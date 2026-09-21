@@ -7,7 +7,7 @@ from . import mcp
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="codeindex", description="Code intelligence for agents.")
+    ap = argparse.ArgumentParser(prog="skygraph", description="Code intelligence for agents.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("index", help="walk a repository and build the graph")

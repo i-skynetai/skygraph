@@ -53,7 +53,7 @@ def serve(db: str = "code-index.db") -> None:
         try:
             if method == "initialize":
                 result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "skynet-code-index", "version": "0.1.0"}}
+                          "serverInfo": {"name": "skygraph", "version": "0.1.0"}}
             elif method == "tools/list":
                 result = {"tools": TOOLS}
             elif method == "tools/call":

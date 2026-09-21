@@ -1,9 +1,9 @@
 import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from codeindex import frontends, mcp
-from codeindex.schema import Symbol, Edge, KINDS, RELATIONS
-from codeindex.store import Store
-from codeindex.indexer import index
+from skygraph import frontends, mcp
+from skygraph.schema import Symbol, Edge, KINDS, RELATIONS
+from skygraph.store import Store
+from skygraph.indexer import index
 
 PY = "import os\nfrom pkg import thing\n\nclass Alpha:\n    def run(self):\n        os.getcwd()\n        helper()\n\ndef helper():\n    pass\n"
 TS = 'import {a} from "./other";\nexport class Beta {}\nexport function go() {}\n'

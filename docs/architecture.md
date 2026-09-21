@@ -45,7 +45,7 @@ python AST failed (invalid syntax line 12); fell to heuristic
 no front end for zig; names found by pattern, not by parsing
 ```
 
-`codeindex degraded --repo X` lists them. Read it after a first index — that list is
+`skygraph degraded --repo X` lists them. Read it after a first index — that list is
 the honest measure of coverage, and it is the number to quote rather than the file
 count.
 

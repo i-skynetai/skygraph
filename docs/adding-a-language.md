@@ -4,7 +4,7 @@ Tier 2 takes about twenty lines and no change to anything downstream.
 
 ## The entry
 
-`codeindex/frontends.py`, in `QUERY_LANGUAGES`:
+`skygraph/frontends.py`, in `QUERY_LANGUAGES`:
 
 ```python
 "elixir": {

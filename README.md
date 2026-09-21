@@ -1,4 +1,6 @@
-# skynet-code-index
+# Skygraph
+
+*A graph of your code, for the agent reading it.*
 
 **Code intelligence for coding agents.** Parses a repository into a graph of files and
 symbols carrying `CALLS`, `IMPORTS`, `CONTAINS` and `INHERITS` edges, and serves symbol
@@ -27,12 +29,12 @@ front end, not touching the core.
 | **3 · heuristic** | last resort, marks everything a guess | anything else |
 
 **Nothing is ever lost silently.** A construct a tier cannot handle degrades to the tier
-below and records *why*, on the file row. `codeindex degraded` lists every one.
+below and records *why*, on the file row. `skygraph degraded` lists every one.
 
 A graph that is quietly incomplete produces confident wrong answers. That is worse than
 a graph that says loudly it could not read a file, so the engine refuses to be quiet.
 
-**The schema is the authority.** `codeindex/schema.py` declares the kinds and relations
+**The schema is the authority.** `skygraph/schema.py` declares the kinds and relations
 that may exist. A front end emitting anything else raises at construction — the process
 stops rather than writing a node nobody declared.
 
@@ -43,26 +45,26 @@ code: the failure mode is empty, not wrong.
 ## Use
 
 ```bash
-git clone https://github.com/arupmmi07/skynet-code-index.git
-cd skynet-code-index
+git clone https://github.com/arupmmi07/skygraph.git
+cd skygraph
 
-python3 -m codeindex index /path/to/a/repo --repo myrepo
-python3 -m codeindex search Alpha --repo myrepo
-python3 -m codeindex neighbours 'src/a.py::Alpha.run' --repo myrepo
-python3 -m codeindex degraded --repo myrepo
+python3 -m skygraph index /path/to/a/repo --repo myrepo
+python3 -m skygraph search Alpha --repo myrepo
+python3 -m skygraph neighbours 'src/a.py::Alpha.run' --repo myrepo
+python3 -m skygraph degraded --repo myrepo
 ```
 
 Indexing itself:
 
 ```json
-{ "files": 7, "symbols": 32, "edges": 266, "languages": 1,
-  "tiers": { "native": 7 }, "degraded": 0 }
+{ "files": 8, "symbols": 61, "edges": 383, "languages": 1,
+  "tiers": { "native": 8 }, "degraded": 0 }
 ```
 
 ## As an MCP server
 
 ```bash
-python3 -m codeindex serve --db code-index.db
+python3 -m skygraph serve --db code-index.db
 ```
 
 Five tools, all read-only: `code_search`, `code_neighbours`, `code_repos`,
