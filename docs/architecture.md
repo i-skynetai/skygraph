@@ -7,6 +7,9 @@
             └── picks the highest tier that claims the extension
 ```
 
+
+![The pipeline end to end, the three tiers, and what the core guarantees regardless of language](images/pipeline.svg)
+
 ## Stages
 
 **Intake.** One file, whole. An AST needs the complete file, not a window — so files

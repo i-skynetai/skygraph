@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 680" width="1080" height="680" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" orient="auto">
+      <path d="M0,0 L7.5,3.2 L0,6.4 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .src{fill:#f8fafc;stroke:#94a3b8;stroke-width:2.5}
+      .fe{fill:#fff7ed;stroke:#ea580c;stroke-width:2.5}
+      .cap{fill:#f0fdf4;stroke:#16a34a;stroke-width:2.5}
+      .gr{fill:#eef2ff;stroke:#6366f1;stroke-width:2.5}
+      .mcp{fill:#f0f9ff;stroke:#0ea5e9;stroke-width:2.5}
+      .panel{fill:#fff;stroke:#cbd5e1;stroke-width:2}
+      .inner{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.6}
+      .h{font-size:22px;fill:#0f172a;font-weight:700}
+      .sub{font-size:13px;fill:#475569}
+      .t{font-size:14px;fill:#0f172a;font-weight:700}
+      .s{font-size:11px;fill:#475569}
+      .tag{font-size:11px;fill:#64748b;font-weight:700}
+      .mono{font-size:11px;fill:#334155;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .ln{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#a)}
+      .dn{stroke:#ea580c;stroke-width:2;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1080" height="680" fill="#f8fafc"/>
+
+  <text class="h" x="40" y="46">Skygraph — one capture vocabulary, three front ends</text>
+  <text class="sub" x="40" y="72">Everything downstream of capture knows nothing about languages. Adding a language means adding a front end, not touching the core.</text>
+
+  <!-- pipeline -->
+  <rect class="src"  x="40"  y="110" width="150" height="76" rx="10"/>
+  <text class="t" x="115" y="140" text-anchor="middle">repository</text>
+  <text class="s" x="115" y="160" text-anchor="middle">files on disk</text>
+  <text class="s" x="115" y="176" text-anchor="middle">at one branch</text>
+
+  <rect class="fe"   x="230" y="110" width="170" height="76" rx="10"/>
+  <text class="t" x="315" y="140" text-anchor="middle">front end</text>
+  <text class="s" x="315" y="160" text-anchor="middle">three tiers, one</text>
+  <text class="s" x="315" y="176" text-anchor="middle">chosen per file</text>
+
+  <rect class="cap"  x="440" y="110" width="190" height="76" rx="10"/>
+  <text class="t" x="535" y="140" text-anchor="middle">capture vocabulary</text>
+  <text class="mono" x="535" y="161" text-anchor="middle">Symbol · Edge</text>
+  <text class="s" x="535" y="177" text-anchor="middle">the only thing the core knows</text>
+
+  <rect class="gr"   x="670" y="110" width="160" height="76" rx="10"/>
+  <text class="t" x="750" y="140" text-anchor="middle">graph</text>
+  <text class="s" x="750" y="160" text-anchor="middle">SQLite · repo and</text>
+  <text class="s" x="750" y="176" text-anchor="middle">branch on every row</text>
+
+  <rect class="mcp"  x="870" y="110" width="170" height="76" rx="10"/>
+  <text class="t" x="955" y="140" text-anchor="middle">MCP</text>
+  <text class="s" x="955" y="160" text-anchor="middle">five read-only tools</text>
+  <text class="s" x="955" y="176" text-anchor="middle">no write tool exists</text>
+
+  <path class="ln" d="M190,148 L226,148"/>
+  <path class="ln" d="M400,148 L436,148"/>
+  <path class="ln" d="M630,148 L666,148"/>
+  <path class="ln" d="M830,148 L866,148"/>
+
+  <!-- tiers -->
+  <rect class="panel" x="40" y="230" width="600" height="270" rx="12"/>
+  <text class="t" x="62" y="260">Three tiers — a front end either parses it, or says it could not</text>
+  <text class="tag" x="62" y="279">every tier emits the same two types · a tier that cannot cope drops to the one below</text>
+
+  <rect class="inner" x="96" y="292" width="524" height="56" rx="8"/>
+  <text class="t" x="114" y="314">1 · native</text>
+  <text class="s" x="114" y="333">a real parse, full fidelity — Python, via the standard library <tspan class="mono">ast</tspan></text>
+
+  <rect class="inner" x="96" y="362" width="524" height="64" rx="8"/>
+  <text class="t" x="114" y="384">2 · query</text>
+  <text class="s" x="114" y="403">declarative patterns per language — TypeScript, JavaScript, Go, Java,</text>
+  <text class="s" x="114" y="419">Ruby, Rust, C#, PHP, Kotlin, Swift</text>
+
+  <rect class="inner" x="96" y="440" width="524" height="46" rx="8"/>
+  <text class="t" x="114" y="462">3 · heuristic</text>
+  <text class="s" x="114" y="479">last resort — marks everything it produced as a guess</text>
+
+  <path class="dn" d="M76,348 L76,358"/>
+  <path class="dn" d="M76,426 L76,436"/>
+  <text class="tag" x="68" y="410" fill="#ea580c" transform="rotate(-90 68 410)" text-anchor="middle">degrades</text>
+
+  <!-- guarantees -->
+  <rect class="panel" x="670" y="230" width="370" height="270" rx="12"/>
+  <text class="t" x="692" y="260">What the core guarantees</text>
+
+  <text class="t" x="692" y="296">The schema is the authority</text>
+  <text class="s" x="692" y="315">A front end emitting an undeclared kind raises</text>
+  <text class="s" x="692" y="331">at construction. Nobody writes a node nobody</text>
+  <text class="s" x="692" y="347">declared.</text>
+
+  <text class="t" x="692" y="383">Scope lives on the row</text>
+  <text class="s" x="692" y="402">A query that forgets to filter returns nothing,</text>
+  <text class="s" x="692" y="418">not another repository's code. The failure</text>
+  <text class="s" x="692" y="434">mode is empty, not wrong.</text>
+
+  <text class="t" x="692" y="470">Indexing is a separate, deliberate act</text>
+  <text class="s" x="692" y="489">There is no write tool on the MCP surface.</text>
+
+  <!-- bottom -->
+  <rect x="40" y="526" width="1000" height="118" rx="12" fill="#fff" stroke="#0f172a" stroke-width="2.5"/>
+  <text class="t" x="540" y="558" text-anchor="middle">Nothing is ever lost silently</text>
+  <text class="s" x="540" y="582" text-anchor="middle">A construct a tier cannot handle degrades to the tier below and records the reason on the file row.</text>
+  <text class="s" x="540" y="600" text-anchor="middle">A graph that is quietly incomplete produces confident wrong answers — worse than one that says loudly it could not read a file.</text>
+  <text class="mono" x="540" y="624" text-anchor="middle">skygraph degraded --repo myrepo   lists every one</text>
+</svg>

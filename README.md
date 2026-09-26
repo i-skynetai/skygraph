@@ -1,5 +1,10 @@
 # Skygraph
 
+[![tests](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml/badge.svg)](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![licence](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
+
+
 *A graph of your code, for the agent reading it.*
 
 **Code intelligence for coding agents.** Parses a repository into a graph of files and
@@ -14,6 +19,11 @@ lives in a *different file*, and that is a graph query, not a text search.
   repository ──► front end ──► capture vocabulary ──► graph ──► MCP
                   (3 tiers)      (one schema)        (SQLite)   (5 read-only tools)
 ```
+
+## The shape
+
+![The pipeline: a repository, a front end at one of three tiers, one capture vocabulary,
+the graph, and five read-only tools over MCP](docs/images/pipeline.svg)
 
 ## The design
 
@@ -83,11 +93,14 @@ deliberate act.
 |---|---|
 | [Architecture](docs/architecture.md) | The pipeline, and where a language plugs in |
 | [Adding a language](docs/adding-a-language.md) | Tier 2 in about twenty lines |
+| [Contributing](CONTRIBUTING.md) | Running the tests, and what a change needs |
+
 
 ## Status
 
-Python 3.11+, standard library only. **18 tests.** Line numbers are recorded for
-declarations; end-of-range is not yet persisted.
+Python 3.11+, standard library only. **18 tests**, run by CI on 3.11, 3.12 and 3.13.
+
+Line numbers are recorded for declarations; end-of-range is not yet persisted.
 
 ## Licence
 
