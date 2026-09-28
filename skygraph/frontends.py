@@ -270,8 +270,22 @@ def _native_python(path: str, source: str) -> FileResult:
                 for a in child.names:
                     out.edges.append(Edge(path, "IMPORTS", a.name))
             elif isinstance(child, ast.ImportFrom):
-                if child.module:
-                    out.edges.append(Edge(path, "IMPORTS", child.module))
+                # `from pkg import a, b` binds `a` and `b`, so each is recorded as
+                # `pkg.a`, `pkg.b`: the resolver finds `pkg/a.py` when `a` is a module
+                # and falls back to `pkg.py` when it is a name inside one. Recording
+                # only `pkg` lost the difference, and `from app import service` then
+                # left every `service.f()` untyped. Leading dots are kept — `from
+                # .sibling import x` names nothing without them.
+                module = "." * (child.level or 0) + (child.module or "")
+                for a in child.names:
+                    if a.name == "*":
+                        target = module
+                    elif module.endswith(".") or not module:
+                        target = f"{module}{a.name}"
+                    else:
+                        target = f"{module}.{a.name}"
+                    if target:
+                        out.edges.append(Edge(path, "IMPORTS", target))
             else:
                 walk(child, prefix, owner)
 

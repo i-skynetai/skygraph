@@ -44,7 +44,8 @@ class PythonParsesNatively(unittest.TestCase):
         calls = {(e.src, e.dst) for e in self.r.edges if e.rel == "CALLS"}
         self.assertIn(("m.py::Alpha.run", "helper"), calls)
         imports = {e.dst for e in self.r.edges if e.rel == "IMPORTS"}
-        self.assertEqual(imports, {"os", "pkg"})
+        self.assertEqual(imports, {"os", "pkg.thing"},
+                         "`from pkg import thing` binds `thing`, and the record says so")
 
 
 class OtherLanguagesAreRead(unittest.TestCase):
@@ -595,6 +596,17 @@ class EveryGrammarKeepsItsReceiver(_Indexed):
         self.assertIn(("p.ts::page", "h.ts::useApiQuery"), self.rel("CALLS"))
         self.assertIn(("h.ts::useApiQuery", "h.ts::load"), self.rel("CALLS"))
 
+    def test_a_tsx_component_keeps_the_calls_inside_it(self):
+        """Parsed as plain TypeScript, a JSX body is an error node and its calls
+        vanish; sixteen of a hook's callers were components."""
+        self.write("h.ts", "export function useTenant(): string { return 't'; }\n")
+        self.write("c.tsx", "import { useTenant } from './h';\n"
+                            "export const Card = ({ a }: { a: string }) => {\n"
+                            "  const t = useTenant();\n"
+                            "  return <div title={a}>{t}</div>;\n};\n")
+        self.build()
+        self.assertIn(("c.tsx::Card", "h.ts::useTenant"), self.rel("CALLS"))
+
     def test_typescript_is_unchanged_by_the_grammar_agnostic_read(self):
         self.write("w.ts", "export class W {\n  r() { return this.f(); }\n"
                            "  f() { return 1; }\n}\n")
@@ -634,7 +646,133 @@ class ImportsAreResolvedToFilesNotNames(_Indexed):
     def test_the_import_is_still_readable_as_written(self):
         raw = [r["raw_dst"] for r in self.store.db.execute(
             "SELECT raw_dst FROM edges WHERE rel='IMPORTS'")]
-        self.assertIn("a.models", raw)
+        self.assertIn("a.models.A", raw)
+
+
+class ImportsResolveByPathNotByName(_Indexed):
+    """The stem of a file name is not an identity. `pkg.models.User` names a path."""
+
+    def test_a_relative_typescript_import_reaches_the_file(self):
+        os.makedirs(os.path.join(self.tmp, "src", "lib"), exist_ok=True)
+        self.write("src/a.ts", "import { b } from './b';\nimport { c } from './lib';\n")
+        self.write("src/b.ts", "export const b = 1;\n")
+        self.write("src/lib/index.ts", "export const c = 1;\n")
+        self.build()
+        got = {r["raw_dst"]: r["dst"] for r in self.store.db.execute(
+            "SELECT raw_dst, dst FROM edges WHERE rel='IMPORTS' AND path='src/a.ts'")}
+        self.assertEqual(got, {"./b": "src/b.ts", "./lib": "src/lib/index.ts"})
+
+    def test_a_module_imported_from_its_package_is_its_own_file(self):
+        os.makedirs(os.path.join(self.tmp, "app"), exist_ok=True)
+        self.write("app/__init__.py", "")
+        self.write("app/service.py", "def configure():\n    return 1\n")
+        self.write("main.py", "from app import service\n\ndef boot():\n"
+                              "    return service.configure()\n")
+        self.build()
+        self.assertEqual(self.store.importers_of("app/service.py", "r"), ["main.py"])
+        self.assertIn(("main.py::boot", "app/service.py::configure"), self.rel("CALLS"))
+
+    def test_a_relative_python_import_keeps_its_level(self):
+        os.makedirs(os.path.join(self.tmp, "pkg", "sub"), exist_ok=True)
+        self.write("pkg/__init__.py", "")
+        self.write("pkg/b.py", "def x():\n    pass\n")
+        self.write("pkg/a.py", "from .b import x\nfrom . import b\n")
+        self.write("pkg/sub/c.py", "from ..b import x\n")
+        self.build()
+        self.assertEqual(sorted(self.store.importers_of("pkg/b.py", "r")),
+                         ["pkg/a.py", "pkg/sub/c.py"])
+        got = {r["raw_dst"]: r["dst"] for r in self.store.db.execute(
+            "SELECT raw_dst, dst FROM edges WHERE rel='IMPORTS' AND path='pkg/a.py'")}
+        self.assertEqual(got, {".b.x": "pkg/b.py", ".b": "pkg/b.py"})
+
+    def test_a_tsconfig_path_alias_is_followed(self):
+        os.makedirs(os.path.join(self.tmp, "libs", "x", "src"), exist_ok=True)
+        os.makedirs(os.path.join(self.tmp, "apps"), exist_ok=True)
+        self.write("tsconfig.json", '{\n  // comment\n  "compilerOptions": {\n'
+                                    '    "baseUrl": ".",\n'
+                                    '    "paths": { "@lib/*": ["libs/*/src/index.ts"], }\n'
+                                    '  },\n}\n')
+        self.write("libs/x/src/index.ts", "export const q = 1;\n")
+        self.write("apps/a.ts", "import { q } from '@lib/x';\n")
+        self.build()
+        self.assertEqual(self.store.importers_of("libs/x/src/index.ts", "r"), ["apps/a.ts"])
+
+    def test_a_java_import_names_its_file_by_package_path(self):
+        os.makedirs(os.path.join(self.tmp, "com", "x"), exist_ok=True)
+        os.makedirs(os.path.join(self.tmp, "com", "y"), exist_ok=True)
+        self.write("com/x/Foo.java", "public class Foo {}\n")
+        self.write("com/y/Bar.java", "import com.x.Foo;\nimport java.util.List;\n"
+                                     "public class Bar {}\n")
+        self.build()
+        got = {r["raw_dst"]: (r["dst"], r["resolution"]) for r in self.store.db.execute(
+            "SELECT raw_dst, dst, resolution FROM edges WHERE rel='IMPORTS'")}
+        self.assertEqual(got["com.x.Foo"], ("com/x/Foo.java", "resolved"))
+        self.assertEqual(got["java.util.List"][1], "external")
+
+    def test_the_closer_of_two_same_named_files_wins_and_a_tie_is_ambiguous(self):
+        for svc in ("svc1", "svc2"):
+            os.makedirs(os.path.join(self.tmp, svc, "app"), exist_ok=True)
+            self.write(f"{svc}/app/models.py", "class M:\n    pass\n")
+        self.write("svc1/app/main.py", "from app.models import M\n")
+        os.makedirs(os.path.join(self.tmp, "other"), exist_ok=True)
+        self.write("other/x.py", "from app.models import M\n")
+        self.build()
+        got = {r["path"]: (r["dst"], r["resolution"]) for r in self.store.db.execute(
+            "SELECT path, dst, resolution FROM edges WHERE rel='IMPORTS'")}
+        self.assertEqual(got["svc1/app/main.py"], ("svc1/app/models.py", "resolved"))
+        self.assertEqual(got["other/x.py"][1], "ambiguous")
+        self.assertEqual(self.store.importers_of("svc2/app/models.py", "r"), [])
+
+
+class AJavaClassSeesItsPackage(_Indexed):
+    """Two honest gaps the benchmark documented, now closed."""
+
+    def setUp(self):
+        super().setUp()
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        os.makedirs(os.path.join(self.tmp, "svc"), exist_ok=True)
+        self.write("svc/TenantContext.java",
+                   "public class TenantContext {\n"
+                   "    public static String getTenantId() { return \"t\"; }\n}\n")
+        self.write("svc/Publisher.java",
+                   "public class Publisher {\n"
+                   "    private String getTenantId() { return \"p\"; }\n"
+                   "    public void publish() {\n"
+                   "        String own = getTenantId();\n"
+                   "        String ctx = TenantContext.getTenantId();\n    }\n}\n")
+        self.build()
+
+    def test_a_same_package_class_is_a_known_receiver_without_an_import(self):
+        self.assertIn(("svc/Publisher.java::Publisher.publish",
+                       "svc/TenantContext.java::TenantContext.getTenantId"),
+                      self.rel("CALLS"))
+
+    def test_a_bare_call_inside_the_class_is_this(self):
+        self.assertIn(("svc/Publisher.java::Publisher.publish",
+                       "svc/Publisher.java::Publisher.getTenantId"), self.rel("CALLS"))
+
+    def test_a_test_under_its_own_source_root_is_in_the_package(self):
+        """`src/test/java/com/x` and `src/main/java/com/x` are one package."""
+        for project, part in (("svc", "main"), ("svc", "test"), ("other", "main")):
+            os.makedirs(os.path.join(self.tmp, project, "src", part, "java", "com", "x"),
+                        exist_ok=True)
+        self.write("svc/src/main/java/com/x/Task.java",
+                   "public class Task {\n    static String parse(String s) { return s; }\n}\n")
+        self.write("svc/src/test/java/com/x/TaskTest.java",
+                   "public class TaskTest {\n    void t() { Task.parse(\"1\"); }\n}\n")
+        self.write("other/src/main/java/com/x/Task.java",
+                   "public class Task {\n    static String parse(String s) { return s; }\n}\n")
+        self.build()
+        self.assertIn(("svc/src/test/java/com/x/TaskTest.java::TaskTest.t",
+                       "svc/src/main/java/com/x/Task.java::Task.parse"), self.rel("CALLS"))
+        self.assertNotIn(("svc/src/test/java/com/x/TaskTest.java::TaskTest.t",
+                          "other/src/main/java/com/x/Task.java::Task.parse"), self.rel("CALLS"))
+
+    def test_the_private_method_still_has_no_callers_elsewhere(self):
+        callers = [s_ for s_, d in self.rel("CALLS")
+                   if d == "svc/Publisher.java::Publisher.getTenantId"]
+        self.assertEqual(callers, ["svc/Publisher.java::Publisher.publish"])
 
 
 class UnplacedIsNotTheSameAsElsewhere(_Indexed):

@@ -120,10 +120,9 @@ class GoldenQuestionsPython(_Bench):
         out = self.ask("outline_file", 400, filepath="app/nope.py")
         self.assertIn("error", out)
 
-    @unittest.expectedFailure
     def test_a_module_imported_from_its_package_is_followed(self):
-        """`from app import service` then `service.configure()`. The import records the
-        package, so the alias `service` is unknown and the call is untyped. Phase 1."""
+        """`from app import service` then `service.configure()` — the import is
+        recorded as `app.service`, which resolves to the module's own file."""
         out = self.ask("expand_symbol", 700, qualified_name="app/service.py::configure")
         self.assertEqual(self.callers(out), {"app/main.py::boot"})
 
@@ -141,8 +140,15 @@ class GoldenQuestionsTypeScriptAndJava(_Bench):
         out = self.ask("expand_symbol", 900,
                        qualified_name="src/hooks/useApiQuery.ts::useApiQuery")
         self.assertEqual(self.callers(out),
-                         {"src/pages/list.ts::ListPage.load", "src/pages/detail.ts::detail"})
+                         {"src/pages/list.ts::ListPage.load", "src/pages/detail.ts::detail",
+                          "src/pages/alias.ts::viaAlias"})
         self.assertEqual(self.callees(out), {"src/hooks/useApiQuery.ts::load"})
+
+    def test_a_tsconfig_alias_import_is_a_real_importer(self):
+        out = self.ask("file_imports", 400, filepath="src/hooks/useApiQuery.ts",
+                       direction="imported_by")
+        self.assertEqual(out["imported_by"], ["src/pages/alias.ts", "src/pages/detail.ts",
+                                              "src/pages/list.ts"])
 
     def test_what_is_in_a_typescript_file(self):
         out = self.ask("outline_file", 1_100, filepath="src/pages/list.ts")
@@ -169,18 +175,16 @@ class GoldenQuestionsTypeScriptAndJava(_Bench):
         traversable = {l["language"] for l in out["languages"] if l["traversable"]}
         self.assertEqual(traversable, {"typescript", "java"})
 
-    @unittest.expectedFailure
     def test_a_same_package_java_class_is_a_known_receiver(self):
         """`TenantContext.getTenantId()` from a class in the same package, with no
-        import. The receiver is untyped today. Phase 1: Java package resolution."""
+        import: a Java package is a directory, and a class there is in scope."""
         out = self.ask("expand_symbol", 700,
                        qualified_name="svc/TenantContext.java::TenantContext.getTenantId")
         self.assertEqual(self.callers(out), {"svc/Publisher.java::Publisher.publish",
                                              "svc/Listener.java::Listener.on"})
 
-    @unittest.expectedFailure
     def test_a_bare_call_inside_a_java_class_is_an_implicit_this(self):
-        """`getTenantId()` inside `Publisher` means `this.getTenantId()`. Phase 1."""
+        """`getTenantId()` inside `Publisher` means `this.getTenantId()`."""
         out = self.ask("expand_symbol", 600,
                        qualified_name="svc/Publisher.java::Publisher.getTenantId")
         self.assertEqual(self.callers(out), {"svc/Publisher.java::Publisher.publish"})

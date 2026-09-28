@@ -221,7 +221,11 @@ def parse(path: str, source: str, language: str) -> FileResult:
     out = FileResult(path=path, language=language, tier="native")
     out.symbols.append(Symbol(path, "Module", path, 1, 0, "native"))
 
-    tree = _parser(language).parse(source.encode("utf-8", "replace"))
+    # JSX is not TypeScript: the plain grammar marks a component body as an error
+    # and the calls inside it vanish. Ninety-three of a hook's 109 callers were found
+    # until a `.tsx` file was parsed as `.ts`; the rest were in components.
+    grammar = "tsx" if path.endswith(".tsx") and "tsx" in SPEC else language
+    tree = _parser(grammar).parse(source.encode("utf-8", "replace"))
     seen: set[str] = set()
 
     def declare(name: str, kind: str, node) -> str:

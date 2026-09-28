@@ -17,6 +17,9 @@ repository every time, and an index that re-parses every run does the same thing
 layer down.
 """
 from __future__ import annotations
+import json
+import posixpath
+import re
 import sqlite3
 from pathlib import Path
 from .ontology import PARSED_TIERS
@@ -72,6 +75,200 @@ CREATE INDEX IF NOT EXISTS ix_edge_path ON edges(path, repo, branch);
 DERIVED = ("symbols", "edges", "files")
 #: `roots` is dropped with the rest on a schema change; it is derived too.
 ALL_TABLES = DERIVED + ("roots",)
+
+
+#: What an import may land on, by the importing file's language. A Python import never
+#: names a `.ts` file. Go names a package directory rather than a file and is left
+#: external; a language not listed is too.
+IMPORT_TARGETS: dict[str, tuple[str, ...]] = {
+    "python":     (".py", "/__init__.py"),
+    "typescript": (".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs",
+                   "/index.ts", "/index.tsx", "/index.js"),
+    "javascript": (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx",
+                   "/index.js", "/index.ts", "/index.tsx"),
+    "java":       (".java",),
+    "kotlin":     (".kt",),
+    "csharp":     (".cs",),
+    "rust":       (".rs", "/mod.rs"),
+    "ruby":       (".rb",),
+    "php":        (".php",),
+    "swift":      (".swift",),
+}
+
+#: Languages where a class in the same package is in scope without an import — a
+#: Java package, a C# namespace folder, a Kotlin package, a Swift module.
+PACKAGE_SCOPED = {"java", "kotlin", "csharp", "swift", "scala"}
+#: Source roots under which the directory *is* the package. `src/main/java/com/x`
+#: and `src/test/java/com/x` are one package in two directories, and a test calling
+#: `Foo.bar()` on the class next door was untyped until the two were read as one.
+SOURCE_ROOTS = re.compile(r"^(.*?)/src/[^/]+/(?:java|kotlin|scala)/(.*)$")
+
+
+def _package_of(path: str) -> str:
+    """The scope a same-package receiver is looked up in: project + package.
+
+    Two services in one monorepo both declare `com.x.Foo`; keying on the package
+    alone would let one service's class answer for the other's, so the part of the
+    path before the source root stays in the key.
+    """
+    folder = path.rsplit("/", 1)[0] if "/" in path else ""
+    m = SOURCE_ROOTS.match(path)
+    if m:
+        return f"{m.group(1)}|{m.group(2).rsplit('/', 1)[0] if '/' in m.group(2) else ''}"
+    return folder
+#: Languages where a bare `name()` inside a class means `this.name()`.
+IMPLICIT_THIS = {"java", "kotlin", "csharp", "swift", "scala", "ruby"}
+
+
+def _exact(base: str, files: dict, targets: tuple[str, ...]) -> str:
+    """The one indexed path `base` names, trying each extension the language allows."""
+    for ext in ("",) + targets:
+        cand = posixpath.normpath(base + ext)
+        if cand in files:
+            return cand
+    return ""
+
+
+def _shared_dirs(a: str, b: str) -> int:
+    """How many leading directories two paths share."""
+    x, y = a.split("/")[:-1], b.split("/")[:-1]
+    n = 0
+    while n < len(x) and n < len(y) and x[n] == y[n]:
+        n += 1
+    return n
+
+
+def _resolve_import(raw: str, importer: str, language: str, files: dict,
+                    suffixes: dict, aliases: list) -> tuple[str, str]:
+    """(indexed path, "resolved") or ("", "external" | "ambiguous").
+
+    Relative imports — `./b`, `../lib`, `from .sibling` — resolve against the importing
+    file's directory and must hit an exact path. Path aliases from `tsconfig` are
+    expanded first. Everything else — `pkg.models.User`, `com.app.Repo`, `crate::a::b`
+    — becomes a path and is matched as a suffix of an indexed path, longest form first,
+    so `pkg.models.User` finds `pkg/models.py` once `pkg/models/User.py` does not
+    exist. Several hits: the one sharing the most leading directories with the importer
+    wins; a tie is ambiguous, because two `app/models.py` in a monorepo are exactly the
+    case where guessing produced the wrong importers.
+    """
+    targets = IMPORT_TARGETS.get(language)
+    raw = (raw or "").strip()
+    if not targets or not raw:
+        return "", "external"
+    here = posixpath.dirname(importer)
+    if language == "java" and raw.startswith("static "):
+        raw = raw[len("static "):]
+
+    if language in ("typescript", "javascript"):
+        for pattern, subs in aliases:
+            if pattern.endswith("/*") and raw.startswith(pattern[:-1]):
+                rest = raw[len(pattern) - 1:]
+                for sub in subs:
+                    # `libs/*/src/index.ts`: the star is wherever the tsconfig put it.
+                    base = sub.replace("*", rest, 1)
+                    found = _exact(base, files, targets)
+                    if found:
+                        return found, "resolved"
+            elif raw == pattern:
+                for sub in subs:
+                    found = _exact(sub, files, targets)
+                    if found:
+                        return found, "resolved"
+
+    if raw.startswith(("./", "../")) or raw == ".":
+        found = _exact(posixpath.join(here, raw), files, targets)
+        return (found, "resolved") if found else ("", "external")
+
+    if language == "python" and raw.startswith("."):
+        level = len(raw) - len(raw.lstrip("."))
+        base = here
+        for _ in range(level - 1):
+            base = posixpath.dirname(base)
+        parts = [x for x in raw.lstrip(".").split(".") if x]
+        for n in range(len(parts), -1, -1):
+            cand = posixpath.join(base, *parts[:n]) if parts[:n] else (base or ".")
+            found = _exact(cand, files, targets)
+            if found:
+                return found, "resolved"
+        return "", "external"
+
+    parts = [x for x in raw.replace("::", "/").replace(".", "/").split("/")
+             if x and x not in ("crate", "self", "super")]
+    for n in range(len(parts), 0, -1):
+        base = "/".join(parts[:n])
+        hits: list[str] = []
+        for ext in targets:
+            hits += suffixes.get(posixpath.normpath(base + ext), [])
+        if not hits:
+            continue
+        hits = sorted(set(hits), key=lambda h: (-_shared_dirs(h, importer), h))
+        if len(hits) == 1 or _shared_dirs(hits[0], importer) > _shared_dirs(hits[1], importer):
+            return hits[0], "resolved"
+        return "", "ambiguous"
+    return "", "external"
+
+
+def _strip_comments(text: str) -> str:
+    """JSON-with-comments, minus the comments — but only outside strings.
+
+    A regex did this first and ate `"@lib/*": ["libs/*/src/index.ts"]`: the `/*` in the
+    alias and the `*/` in its target look exactly like a block comment. Every tsconfig
+    path pattern has a `/*` in it, so the regex broke on precisely the input that
+    matters.
+    """
+    out, i, n, in_string = [], 0, len(text), False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True; out.append(ch)
+        elif text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _path_aliases(root: str | None) -> list[tuple[str, list[str]]]:
+    """`compilerOptions.paths` from a tsconfig at the repository root, if any.
+
+    Nearly every TypeScript monorepo imports its own libraries through one — 4,798 of
+    one repository's imports begin with an alias — and without it every one of them is
+    "external". Comments and trailing commas are tolerated because tsconfig allows them.
+    """
+    if not root:
+        return []
+    for name in ("tsconfig.base.json", "tsconfig.json"):
+        target = Path(root) / name
+        if not target.is_file():
+            continue
+        try:
+            text = re.sub(r",\s*([}\]])", r"\1", _strip_comments(
+                target.read_text(encoding="utf-8")))
+            options = json.loads(text).get("compilerOptions") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        base = options.get("baseUrl") or "."
+        out = []
+        for pattern, subs in (options.get("paths") or {}).items():
+            if isinstance(subs, list):
+                out.append((pattern, [posixpath.normpath(posixpath.join(base, s))
+                                      for s in subs if isinstance(s, str)]))
+        if out:
+            return out
+    return []
 
 
 class Store:
@@ -204,22 +401,24 @@ class Store:
     def resolve_imports(self, repo: str, branch: str = "main") -> dict:
         """Point each import at the file it names, once, before anything reads them.
 
-        An import is written as a module — `./thing`, `.store`, `com.app.Repo` — and
-        which file that is takes the whole repository. Matching on the last segment
-        instead was wrong in a way that only a large repository shows: 81 of 1,265
-        module names on one codebase are shared (`__init__` 123 times, `models` 25), so
-        two unrelated `models.py` reported the same 162 importers, each claiming the
-        other's.
+        An import is written as a module — `./thing`, `.store`, `pkg.models.User`,
+        `com.app.Repo` — and which file that is takes the whole repository. Matching
+        on the last segment was wrong in a way only a large repository shows: 81 of
+        1,265 module names on one codebase are shared, so two unrelated `models.py`
+        reported the same 162 importers. Now the import is turned into a path and
+        matched as one — see `_resolve_import`.
 
         `raw_dst` keeps the import exactly as written; `dst` becomes the file when
         there is one, and the resolution says which.
         """
-        stems: dict[str, list[str]] = {}
-        for row in self.db.execute(
-                "SELECT DISTINCT path FROM files WHERE repo=? AND branch=?",
-                (repo, branch)):
-            path = row["path"]
-            stems.setdefault(path.rsplit("/", 1)[-1].rsplit(".", 1)[0], []).append(path)
+        files = {r["path"]: r["language"] for r in self.db.execute(
+            "SELECT path, language FROM files WHERE repo=? AND branch=?", (repo, branch))}
+        suffixes: dict[str, list[str]] = {}
+        for path in files:
+            parts = path.split("/")
+            for i in range(len(parts)):
+                suffixes.setdefault("/".join(parts[i:]), []).append(path)
+        aliases = _path_aliases(self.root_of(repo, branch))
 
         counts = {"resolved": 0, "ambiguous": 0, "external": 0}
         with self.db:
@@ -227,24 +426,16 @@ class Store:
             for row in self.db.execute(
                     "SELECT rowid, path, raw_dst FROM edges WHERE repo=? AND branch=? "
                     "AND rel='IMPORTS'", (repo, branch)).fetchall():
-                raw = str(row["raw_dst"] or "")
-                segments = [x for x in raw.lstrip("./").replace("/", ".").split(".") if x]
-                found = stems.get(segments[-1], []) if segments else []
-                if len(found) > 1 and len(segments) > 1:
-                    # Several files share the name; the segment before it usually says
-                    # which directory was meant.
-                    parent = segments[-2]
-                    narrowed = [f for f in found if f"/{parent}/" in f or f.startswith(f"{parent}/")]
-                    if len(narrowed) == 1:
-                        found = narrowed
-                if len(found) == 1:
+                found, why = _resolve_import(row["raw_dst"], row["path"],
+                                             files.get(row["path"], ""), files,
+                                             suffixes, aliases)
+                if found:
                     cur.execute("UPDATE edges SET dst=?, resolution='resolved' "
-                                "WHERE rowid=?", (found[0], row["rowid"]))
-                    counts["resolved"] += 1
+                                "WHERE rowid=?", (found, row["rowid"]))
                 else:
                     cur.execute("UPDATE edges SET dst=raw_dst, resolution=? WHERE rowid=?",
-                                ("ambiguous" if found else "external", row["rowid"]))
-                    counts["ambiguous" if found else "external"] += 1
+                                (why, row["rowid"]))
+                counts[why] += 1
         return counts
 
     def resolve_calls(self, repo: str, branch: str = "main") -> dict:
@@ -277,6 +468,8 @@ class Store:
         #: Classes by the file that declares them, to tell a receiver naming a class
         #: from one naming a module.
         classes_in: dict[str, dict[str, str]] = {}
+        dir_classes: dict[str, dict[str, str]] = {}
+        class_names: set[str] = set()
         for row in self.db.execute(
                 "SELECT name, path, kind FROM symbols WHERE repo=? AND branch=? "
                 "AND kind IN ('Function','Method','Class')", (repo, branch)):
@@ -297,6 +490,11 @@ class Store:
                 plain_file.setdefault(path, {}).setdefault(bare, name)
                 if row["kind"] == "Class":
                     classes_in.setdefault(path, {})[bare] = name
+                    # A Java package is a directory: a class there is in scope for
+                    # every file beside it, with no import to record it.
+                    dir_classes.setdefault(_package_of(path), {}).setdefault(bare, name)
+            if row["kind"] == "Class":
+                class_names.add(name)
 
         # module stem -> the file that defines it, for following an import
         #: Which language each file is, so a name is never matched across one. A Java
@@ -411,11 +609,28 @@ class Store:
                     if bare in members:
                         return members[bare], "imported-class"
                     return "", unplaced(bare)
+                # A Java package needs no import: `TenantContext.getTenantId()` from
+                # the class next door is a receiver this file can see.
+                if mine in PACKAGE_SCOPED:
+                    owner = dir_classes.get(_package_of(path), {}).get(root)
+                    if owner:
+                        members = by_owner.get(owner, {})
+                        if bare in members:
+                            return members[bare], "same-package"
+                        return "", unplaced(bare)
                 # An unknown receiver: a local, a parameter, a return value. We do not
                 # know its type, so we do not know whose method this is. Resolving on
                 # the name being unique is the guess this refuses everywhere else —
                 # `config.get("a")` is a dictionary in almost every file holding one.
                 return "", unplaced(bare)
+
+            # In Java and its relatives a bare `name()` inside a class is `this.name()`
+            # — but only when the class actually declares it; anything else is a
+            # static import or an inherited member, and that is not knowable here.
+            if mine in IMPLICIT_THIS and "." in src.rsplit("::", 1)[-1]:
+                owner = src.rsplit(".", 1)[0]
+                if owner in class_names and bare in by_owner.get(owner, {}):
+                    return by_owner[owner][bare], "implicit-this"
 
             # A bare call reaches a function or a class, never a method.
             if bare in plain_file.get(path, {}):
@@ -595,31 +810,41 @@ class Store:
         return sorted(out.values(), key=lambda e: e["name"])
 
     def language_coverage(self, repo: str, branch: str = "main") -> list[dict]:
-        """Per language: files, symbols, and whether it produces call edges at all.
+        """Per language: files, symbols, call edges and how they resolved.
 
         An agent cannot tell a thin graph from a complete one by querying it — both
-        answer, one just answers less. Only tier 1 emits calls today, so a repository
-        that is mostly TypeScript has a symbol list and no traversal, and nothing in
-        the rows says so.
+        answer, one just answers less. A language read by a pattern has declarations
+        and no calls; a language read by a parser but with most receivers untyped has
+        calls that mostly go nowhere. Both are worth knowing before trusting
+        `called_by`, and neither is visible in the rows.
         """
-        out = []
-        for row in self.db.execute(
-                "SELECT language, COUNT(*) AS files FROM files WHERE repo=? AND branch=? "
-                "GROUP BY language ORDER BY files DESC", (repo, branch)):
-            paths = [r["path"] for r in self.db.execute(
-                "SELECT path FROM files WHERE repo=? AND branch=? AND language=?",
-                (repo, branch, row["language"]))]
-            marks = ",".join("?" * len(paths)) or "''"
-            symbols = self.db.execute(
-                f"SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=? "
-                f"AND path IN ({marks})", (repo, branch, *paths)).fetchone()[0]
-            calls = self.db.execute(
-                f"SELECT COUNT(*) FROM edges WHERE repo=? AND branch=? AND rel='CALLS' "
-                f"AND path IN ({marks})", (repo, branch, *paths)).fetchone()[0]
-            out.append({"language": row["language"], "files": row["files"],
-                        "symbols": symbols, "call_edges": calls,
-                        "traversable": calls > 0})
-        return out
+        out: dict[str, dict] = {}
+        for r in self.db.execute(
+                "SELECT language, COUNT(*) AS n FROM files WHERE repo=? AND branch=? "
+                "GROUP BY language ORDER BY n DESC", (repo, branch)):
+            out[r["language"]] = {"language": r["language"], "files": r["n"],
+                                  "symbols": 0, "call_edges": 0, "resolved": 0,
+                                  "untyped": 0, "traversable": False}
+        for r in self.db.execute(
+                "SELECT f.language, COUNT(*) AS n FROM symbols s JOIN files f "
+                "ON f.path=s.path AND f.repo=s.repo AND f.branch=s.branch "
+                "WHERE s.repo=? AND s.branch=? GROUP BY f.language", (repo, branch)):
+            if r["language"] in out:
+                out[r["language"]]["symbols"] = r["n"]
+        for r in self.db.execute(
+                "SELECT f.language, e.resolution, COUNT(*) AS n FROM edges e JOIN files f "
+                "ON f.path=e.path AND f.repo=e.repo AND f.branch=e.branch "
+                "WHERE e.repo=? AND e.branch=? AND e.rel='CALLS' "
+                "GROUP BY f.language, e.resolution", (repo, branch)):
+            row = out.get(r["language"])
+            if row is None:
+                continue
+            row["call_edges"] += r["n"]
+            if r["resolution"] in ("resolved", "untyped"):
+                row[r["resolution"]] += r["n"]
+        for row in out.values():
+            row["traversable"] = row["call_edges"] > 0
+        return list(out.values())
 
     def _absent(self, repo: str, branch: str, by_ontology: dict) -> list[str]:
         with_edges = {r["ontology"] for r in self.db.execute(
@@ -848,6 +1073,14 @@ class Store:
                                   "DEPLOYED_BY", "CONFIGURED_BY")},
             "env_read_but_undeclared": [
                 e["name"] for e in self.env_usage(repo, branch) if not e["declared"]][:20],
+            # The tier names are short and two of them mislead on their own: "query"
+            # is a line pattern or a naming convention, not a database query, and
+            # never yields a call edge; "heuristic" is the floor.
+            "tier_note": "native = a real parse (Python ast, tree-sitter): declarations "
+                         "and calls; query = a line pattern or a naming convention: "
+                         "declarations only, never calls; model = a language model's "
+                         "reading of a file no parser could read; heuristic = the floor, "
+                         "every row a guess",
             "link_note": "PERSISTS_TO is derived from a resolved call to a model, so it "
                          "is tier 'query' and a lead rather than a fact. HANDLED_BY and "
                          "MAPS_TO come from declarations and are tier 'native'.",
