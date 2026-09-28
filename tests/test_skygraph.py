@@ -583,6 +583,18 @@ class EveryGrammarKeepsItsReceiver(_Indexed):
         self.build()
         self.assertIn(("w.ts::b", "w.ts::W"), self.rel("CALLS"))
 
+    def test_type_arguments_are_not_part_of_the_callee(self):
+        """`useApiQuery<string[]>('k')` calls `useApiQuery`. The `<string[]>` was kept,
+        looked like a subscript, and made a function in the next file "external"."""
+        self.write("h.ts", "export function useApiQuery<T>(k: string): T {\n"
+                           "  return load<T>(k);\n}\nfunction load<T>(k: string): T {\n"
+                           "  return JSON.parse(k) as T;\n}\n")
+        self.write("p.ts", "import { useApiQuery } from './h';\n"
+                           "export function page() { return useApiQuery<string[]>('x'); }\n")
+        self.build()
+        self.assertIn(("p.ts::page", "h.ts::useApiQuery"), self.rel("CALLS"))
+        self.assertIn(("h.ts::useApiQuery", "h.ts::load"), self.rel("CALLS"))
+
     def test_typescript_is_unchanged_by_the_grammar_agnostic_read(self):
         self.write("w.ts", "export class W {\n  r() { return this.f(); }\n"
                            "  f() { return 1; }\n}\n")
@@ -1682,6 +1694,48 @@ class EveryToolAnswersAboutTheWholeFile(_Indexed):
                                                      "limit": 100000})
         self.assertLessEqual(len(got["results"]), self.surface.MAX_ROWS)
         self.assertIn("capped", got.get("note", ""))
+
+
+class AFileTheIndexHasNotSeenIsAnErrorNotAnEmptyAnswer(_Indexed):
+    """`signatures: []` also means "indexed, declares nothing" — a SQL file, a
+    template. An agent shown an empty list for a path that was never indexed reads it
+    as "nothing here" and moves on, which is the confident wrong answer this project
+    refuses everywhere else."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tmp, "a", "b"), exist_ok=True)
+        os.makedirs(os.path.join(self.tmp, "c"), exist_ok=True)
+        self.write("a/b/models.py", "def one():\n    pass\n")
+        self.write("c/models.py", "def two():\n    pass\n")
+        self.write("empty.sql", "-- nothing declared\n")
+        self.build()
+        from skygraph import tools as surface
+        self.surface = surface
+
+    def test_outline_of_an_unindexed_file_is_an_error(self):
+        out = self.surface.outline_file(self.store, {"repo": "r", "filepath": "zzz.py"})
+        self.assertIn("error", out)
+        self.assertNotIn("signatures", out)
+
+    def test_imports_of_an_unindexed_file_is_an_error(self):
+        out = self.surface.file_imports(self.store, {"repo": "r", "filepath": "zzz.py",
+                                                     "direction": "both"})
+        self.assertIn("error", out)
+
+    def test_an_indexed_file_that_declares_nothing_is_still_an_empty_list(self):
+        out = self.surface.outline_file(self.store, {"repo": "r", "filepath": "empty.sql"})
+        self.assertNotIn("error", out)
+        self.assertEqual(out["signatures"], [])
+
+    def test_a_unique_suffix_is_accepted(self):
+        out = self.surface.outline_file(self.store, {"repo": "r", "filepath": "b/models.py"})
+        self.assertEqual(out["filepath"], "a/b/models.py")
+
+    def test_an_ambiguous_suffix_is_refused_rather_than_guessed(self):
+        out = self.surface.outline_file(self.store, {"repo": "r", "filepath": "models.py"})
+        self.assertIn("error", out)
+        self.assertIn("more than one", out["error"])
 
 
 class ImportDirectionIsMatchedOnTheModule(_Indexed):

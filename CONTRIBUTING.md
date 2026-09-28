@@ -10,8 +10,17 @@ python3 -m unittest discover -s tests -t .                 # the default install
 Run it **both ways**. The parser tier only executes when tree-sitter is installed, and
 a skipped test is not evidence — CI runs the suite twice for the same reason.
 
-166 cases; the core is standard library only — no install step, nothing to pin. That is the same
+190 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
 command CI runs, so a green run here is the run that matters.
+
+## The benchmark
+
+`tests/test_benchmark.py` indexes two small repositories under `tests/fixtures/` and asks
+the questions a coder asks — where is X, what is in this file, who calls X, which table
+does this endpoint write — with answers known from the source, not derived from grep.
+Each answer must be right and must fit a byte ceiling. A gap the graph cannot answer yet
+is an `expectedFailure`: it stays in the suite and flips the day it is fixed, so the
+ceiling and the answer get re-checked then. Add a question here before adding a tool.
 
 ## What a change needs
 

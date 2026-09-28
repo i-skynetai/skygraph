@@ -157,8 +157,11 @@ def _name_of(node) -> str:
 #: The child that holds a call's arguments, whatever the grammar calls it. Taking the
 #: text before it gives the callee exactly as written, in every language, without
 #: needing to know which field name each grammar uses for the receiver.
+#: Where the callee ends. Type arguments are listed too: `useApiQuery<string[]>(k)` is a
+#: call to `useApiQuery`, and reading up to the arguments alone kept the `<string[]>`,
+#: which then looked like a subscript and made an in-repository function "external".
 ARGUMENT_NODES = ("arguments", "argument_list", "value_arguments", "call_arguments",
-                  "call_suffix", "parenthesized_expression")
+                  "call_suffix", "parenthesized_expression", "type_arguments")
 
 
 def _callee(node) -> str:

@@ -156,18 +156,23 @@ def outline_file(store: Store, args: dict) -> dict:
     repo = _need(args, "repo", "outline_file")
     path = _need(args, "filepath", "outline_file")
     branch = args.get("branch", "main")
-    rows = store.in_file(path, repo, branch)
-    if not rows:
-        # A suffix is what an agent usually has to hand, so try it before giving up.
-        match = [f["path"] for f in store.files(repo, branch, limit=5000)
-                 if f["path"].endswith("/" + path) or f["path"] == path]
-        if match:
-            rows = store.in_file(match[0], repo, branch)
-            path = match[0]
-    return {"repo": repo, "filepath": path,
+    found = store.resolve_path(path, repo, branch)
+    if found is None:
+        return _not_indexed(repo, path)
+    rows = store.in_file(found, repo, branch)
+    return {"repo": repo, "filepath": found,
             "signatures": [{k: r[k] for k in
                             ("name", "kind", "line", "end_line", "tier", "summary")}
                            for r in rows]}
+
+
+def _not_indexed(repo: str, path: str) -> dict:
+    """An empty list would also mean "indexed, declares nothing" — a SQL file, a
+    template — and an agent cannot tell the two apart. A file the index has never seen
+    is a different fact, and it is the one that should send the agent to the file."""
+    return {"error": f"{path} is not indexed in {repo}: no such file, or more than one "
+                     "file ends with that path. Use list_files or map_coverage, or "
+                     "re-run `skygraph index`."}
 
 
 def read_source(store: Store, args: dict) -> dict:
@@ -255,6 +260,10 @@ def file_imports(store: Store, args: dict) -> dict:
     path = _need(args, "filepath", "file_imports")
     branch = args.get("branch", "main")
     which = args.get("direction", "imports")
+    found = store.resolve_path(path, repo, branch)
+    if found is None:
+        return _not_indexed(repo, path)
+    path = found
     out: dict = {"repo": repo, "filepath": path, "direction": which}
     if which in ("imports", "both"):
         out["imports"] = [r["dst"] for r in

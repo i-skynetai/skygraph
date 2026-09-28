@@ -101,6 +101,23 @@ class Store:
 
     # ── writes ─────────────────────────────────────────────────────────────
 
+    def resolve_path(self, path: str, repo: str, branch: str = "main") -> str | None:
+        """The indexed path this names — exactly, or as the unique suffix an agent
+        usually has to hand (`auth/session.py` for `src/app/auth/session.py`).
+
+        None when nothing matches, and None when two files match: `models.py` names
+        twenty-five files on one codebase, and picking the first would answer about
+        whichever one sorts earliest.
+        """
+        rows = self.db.execute(
+            "SELECT path FROM files WHERE repo=? AND branch=? AND (path=? OR path LIKE ?) "
+            "ORDER BY path LIMIT 2", (repo, branch, path, f"%/{path}")).fetchall()
+        if not rows:
+            return None
+        if rows[0]["path"] == path or len(rows) == 1:
+            return rows[0]["path"]
+        return None
+
     def digest_of(self, path: str, repo: str, branch: str) -> str | None:
         """The content hash recorded for this file, or None if it is not indexed."""
         row = self.db.execute(
