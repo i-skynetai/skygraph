@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skygraph"
+version = "0.1.0"
+description = "Code intelligence for coding agents — a graph of your code, served over MCP"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Arup Kumar Sarkar" }]
+keywords = ["mcp", "code-intelligence", "knowledge-graph", "ai-agents", "static-analysis"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+]
+
+# No runtime dependencies, deliberately. The parsers are the standard library, the
+# YAML reader is ours, and the model tier talks over urllib. Anything added here is
+# added to every install of every consumer.
+dependencies = []
+
+[project.optional-dependencies]
+# A real parse for every language that is not Python. Optional because a consumer
+# inherits whatever this depends on, and a parser for thirty grammars is worth an
+# install without being worth forcing on everyone. Without it those languages are read
+# by line patterns, which find declarations and cannot find calls — and `index_health`
+# says so per language rather than answering thinly and looking healthy.
+parsers = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
+
+[project.urls]
+Homepage = "https://github.com/arupmmi07/skygraph"
+Source = "https://github.com/arupmmi07/skygraph"
+
+[project.scripts]
+skygraph = "skygraph.__main__:main"
+skygraph-mcp = "skygraph.__main__:serve_entry"
+
+[tool.setuptools]
+packages = ["skygraph"]

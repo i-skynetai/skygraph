@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""The MCP server, startable from anywhere, with whatever parsers are beside it.
+
+Two problems this solves, both of which look identical to a host — the server starts,
+dies before writing a byte, and all the host can report is "connection closed".
+
+**Where the code is.** `python3 -m skygraph serve` only resolves when the working
+directory is this one, and a host does not promise a server any particular working
+directory. So this puts its own directory on `sys.path` first.
+
+**Which Python.** The optional parser tier needs `tree_sitter`, and the interpreter a
+host happens to pick will not have it. If a `.venv` sits beside this script, the script
+re-executes itself with that interpreter — once, guarded, so it cannot loop. Without a
+`.venv` it runs on whatever `python3` is, and the parser tier simply stays off.
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _prefer_local_venv() -> None:
+    """Re-exec under ./.venv if it exists and we are not already inside it."""
+    if os.environ.get("SKYGRAPH_REEXEC"):
+        return                                  # already switched; never loop
+    for candidate in (os.path.join(HERE, ".venv", "bin", "python3"),
+                      os.path.join(HERE, ".venv", "Scripts", "python.exe")):
+        if os.path.isfile(candidate) and os.path.realpath(candidate) != \
+                os.path.realpath(sys.executable):
+            os.environ["SKYGRAPH_REEXEC"] = "1"
+            os.execv(candidate, [candidate, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+_prefer_local_venv()
+sys.path.insert(0, HERE)
+
+from skygraph import mcp                                          # noqa: E402
+from skygraph.__main__ import DEFAULT_DB                          # noqa: E402
+
+if __name__ == "__main__":
+    db = DEFAULT_DB
+    if "--db" in sys.argv:
+        db = sys.argv[sys.argv.index("--db") + 1]
+    mcp.serve(db)

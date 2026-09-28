@@ -1,58 +1,736 @@
-"""SQLite store. Symbols, edges, and the repo/branch scope every row carries.
+"""SQLite store. Nodes, edges, and the repo/branch scope every row carries.
 
 Scope is on the row, not on the query. A query that forgets to filter returns nothing
 rather than another repository's code — the failure is empty, not wrong.
+
+**A file's rows are replaced, never added to.** Writing a file first forgets everything
+that file previously contributed, then writes what it contributes now. Appending instead
+was the original behaviour and it was wrong twice over: re-indexing unchanged code
+doubled every edge, and a symbol that had been renamed or deleted stayed in the graph
+answering searches forever. Both are the quiet-incompleteness this project refuses — a
+stale answer looks exactly like a correct one.
+
+**A file that has not changed is not re-read.** Every file row carries a content hash,
+and the indexer skips a file whose hash has not moved. This is the economic argument of
+the whole project: an agent that re-derives context every session pays for the whole
+repository every time, and an index that re-parses every run does the same thing one
+layer down.
 """
 from __future__ import annotations
 import sqlite3
 from pathlib import Path
+from .ontology import PARSED_TIERS
 from .schema import FileResult
+
+#: Where the index lives when nobody says otherwise. Defined here, in the module that
+#: owns the database, because it was defined twice: the CLI used `~/.skygraph/index.db`
+#: and `index()` defaulted to `code-index.db` in the working directory. A caller that
+#: used the library rather than the command wrote a second index somewhere else and
+#: found the first one empty.
+DEFAULT_DB = "~/.skygraph/index.db"
+
+#: Bumped when the table shape changes. An index is derived from source and is never the
+#: authority, so a change rebuilds it rather than migrating it — but it says so.
+SCHEMA_VERSION = 6
 
 DDL = """
 CREATE TABLE IF NOT EXISTS symbols (
-  name TEXT, kind TEXT, path TEXT, line INTEGER, tier TEXT,
+  name TEXT, kind TEXT, path TEXT, line INTEGER, end_line INTEGER, tier TEXT,
+  ontology TEXT NOT NULL, summary TEXT,
   repo TEXT NOT NULL, branch TEXT NOT NULL,
-  PRIMARY KEY (name, repo, branch)
+  -- The ontology is part of the identity. One name is often two things: a SQLAlchemy
+  -- model is a Class in code_ontology and an Entity in data_ontology, and they are both
+  -- true. Keying on the name alone let whichever was written second delete the other,
+  -- silently, so a repository's class count fell as its model count rose.
+  PRIMARY KEY (name, ontology, repo, branch)
 );
 CREATE TABLE IF NOT EXISTS edges (
-  src TEXT, rel TEXT, dst TEXT,
+  src TEXT, rel TEXT, dst TEXT, tier TEXT,
+  ontology TEXT NOT NULL, path TEXT,
+  -- What `dst` was before resolution, and how resolution went. A call site names a
+  -- bare callee; only a whole-repository pass can say which declaration it meant.
+  raw_dst TEXT, resolution TEXT,
   repo TEXT NOT NULL, branch TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS files (
-  path TEXT, language TEXT, tier TEXT, degraded TEXT,
+  path TEXT, language TEXT, tier TEXT, degraded TEXT, digest TEXT,
   repo TEXT NOT NULL, branch TEXT NOT NULL,
   PRIMARY KEY (path, repo, branch)
 );
-CREATE INDEX IF NOT EXISTS ix_sym_scope  ON symbols(repo, branch);
-CREATE INDEX IF NOT EXISTS ix_edge_src   ON edges(src, repo, branch);
-CREATE INDEX IF NOT EXISTS ix_edge_dst   ON edges(dst, repo, branch);
+CREATE TABLE IF NOT EXISTS roots (
+  repo TEXT NOT NULL, branch TEXT NOT NULL, root TEXT NOT NULL,
+  PRIMARY KEY (repo, branch)
+);
+CREATE INDEX IF NOT EXISTS ix_sym_scope ON symbols(repo, branch);
+CREATE INDEX IF NOT EXISTS ix_sym_path  ON symbols(path, repo, branch);
+CREATE INDEX IF NOT EXISTS ix_sym_onto  ON symbols(ontology, repo, branch);
+CREATE INDEX IF NOT EXISTS ix_edge_src  ON edges(src, repo, branch);
+CREATE INDEX IF NOT EXISTS ix_edge_dst  ON edges(dst, repo, branch);
+CREATE INDEX IF NOT EXISTS ix_edge_path ON edges(path, repo, branch);
 """
+
+DERIVED = ("symbols", "edges", "files")
+#: `roots` is dropped with the rest on a schema change; it is derived too.
+ALL_TABLES = DERIVED + ("roots",)
 
 
 class Store:
+    #: True when opening this database discarded an index built by an older version.
+    rebuilt: bool
+
     def __init__(self, path: str | Path = "code-index.db") -> None:
-        self.db = sqlite3.connect(str(path))
+        Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(str(Path(path).expanduser()))
         self.db.row_factory = sqlite3.Row
+        self.rebuilt = self._reset_if_stale()
         self.db.executescript(DDL)
 
-    def write(self, result: FileResult, repo: str, branch: str) -> None:
-        cur = self.db.cursor()
-        cur.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?)",
-                    (result.path, result.language, result.tier, result.degraded, repo, branch))
-        for s in result.symbols:
-            cur.execute("INSERT OR REPLACE INTO symbols VALUES (?,?,?,?,?,?,?)",
-                        (s.name, s.kind, s.path, s.line, s.tier, repo, branch))
-        for e in result.edges:
-            cur.execute("INSERT INTO edges VALUES (?,?,?,?,?)", (e.src, e.rel, e.dst, repo, branch))
+    def _reset_if_stale(self) -> bool:
+        found = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if found == SCHEMA_VERSION:
+            return False
+        present = {r[0] for r in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        had_rows = any(t in present and self.db.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone()
+                       for t in DERIVED)
+        for table in ALL_TABLES:
+            self.db.execute(f"DROP TABLE IF EXISTS {table}")
+        self.db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.db.commit()
+        return had_rows
+
+    # ── writes ─────────────────────────────────────────────────────────────
+
+    def digest_of(self, path: str, repo: str, branch: str) -> str | None:
+        """The content hash recorded for this file, or None if it is not indexed."""
+        row = self.db.execute(
+            "SELECT digest FROM files WHERE path=? AND repo=? AND branch=?",
+            (path, repo, branch)).fetchone()
+        return row["digest"] if row else None
+
+    def stale(self, path: str, repo: str, branch: str, root: str | None = None) -> bool:
+        """True when the file on disk no longer matches what was indexed.
+
+        The index records a content hash per file, and nothing read it back. So a tool
+        that returns a line range kept answering with yesterday's line numbers against
+        today's file — confidently, because the range itself was exact when it was
+        recorded. That is the worst shape of wrong answer this project has: correct
+        data, correct machinery, and an answer that points at the wrong function.
+        """
+        recorded = self.digest_of(path, repo, branch)
+        if recorded is None:
+            return False
+        root = root or self.root_of(repo, branch)
+        if not root:
+            return False
+        from .indexer import digest                      # local: avoids a cycle
+        try:
+            return digest(Path(root).joinpath(path).read_text(encoding="utf-8",
+                                                              errors="replace")) != recorded
+        except OSError:
+            return True
+
+    def _forget(self, cur: sqlite3.Cursor, path: str, repo: str, branch: str) -> None:
+        for table in DERIVED:
+            cur.execute(f"DELETE FROM {table} WHERE path=? AND repo=? AND branch=?",
+                        (path, repo, branch))
+
+    def write(self, result: FileResult, repo: str, branch: str) -> None:
+        """Replace this file's contribution. Re-writing unchanged input is a no-op."""
+        with self.db:                       # one transaction: never half-replaced
+            cur = self.db.cursor()
+            self._forget(cur, result.path, repo, branch)
+            cur.execute("INSERT INTO files VALUES (?,?,?,?,?,?,?)",
+                        (result.path, result.language, result.tier, result.degraded,
+                         result.digest, repo, branch))
+            for s in result.symbols:
+                cur.execute("INSERT OR REPLACE INTO symbols VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (s.name, s.kind, s.path, s.line, s.end_line, s.tier,
+                             s.ontology, s.summary, repo, branch))
+            for e in result.edges:
+                cur.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (e.src, e.rel, e.dst, e.tier, e.ontology, result.path,
+                             e.dst, "unresolved", repo, branch))
+
+    def prune(self, keep: set[str], repo: str, branch: str) -> list[str]:
+        """Forget indexed files that no longer exist. Returns their paths.
+
+        Without this a deleted file keeps answering searches, which is the same failure
+        as a stale symbol: confidently wrong rather than visibly short.
+        """
+        indexed = [r["path"] for r in self.db.execute(
+            "SELECT path FROM files WHERE repo=? AND branch=?", (repo, branch))]
+        gone = sorted(p for p in indexed if p not in keep)
+        if gone:
+            with self.db:
+                cur = self.db.cursor()
+                for path in gone:
+                    self._forget(cur, path, repo, branch)
+        return gone
+
+    def remember_root(self, repo: str, branch: str, root: str) -> None:
+        """Where this repository lives on disk, so `read_source` can read the file.
+
+        The index holds structure; the disk holds text. Copying source into the database
+        would double it and let it go stale the moment someone edits a file, so the one
+        tool that returns code reads it live and the index only says where to look.
+        """
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO roots VALUES (?,?,?)",
+                            (repo, branch, root))
+
+    def root_of(self, repo: str, branch: str = "main") -> str | None:
+        row = self.db.execute("SELECT root FROM roots WHERE repo=? AND branch=?",
+                              (repo, branch)).fetchone()
+        return row["root"] if row else None
+
+    def resolve_imports(self, repo: str, branch: str = "main") -> dict:
+        """Point each import at the file it names, once, before anything reads them.
+
+        An import is written as a module — `./thing`, `.store`, `com.app.Repo` — and
+        which file that is takes the whole repository. Matching on the last segment
+        instead was wrong in a way that only a large repository shows: 81 of 1,265
+        module names on one codebase are shared (`__init__` 123 times, `models` 25), so
+        two unrelated `models.py` reported the same 162 importers, each claiming the
+        other's.
+
+        `raw_dst` keeps the import exactly as written; `dst` becomes the file when
+        there is one, and the resolution says which.
+        """
+        stems: dict[str, list[str]] = {}
+        for row in self.db.execute(
+                "SELECT DISTINCT path FROM files WHERE repo=? AND branch=?",
+                (repo, branch)):
+            path = row["path"]
+            stems.setdefault(path.rsplit("/", 1)[-1].rsplit(".", 1)[0], []).append(path)
+
+        counts = {"resolved": 0, "ambiguous": 0, "external": 0}
+        with self.db:
+            cur = self.db.cursor()
+            for row in self.db.execute(
+                    "SELECT rowid, path, raw_dst FROM edges WHERE repo=? AND branch=? "
+                    "AND rel='IMPORTS'", (repo, branch)).fetchall():
+                raw = str(row["raw_dst"] or "")
+                segments = [x for x in raw.lstrip("./").replace("/", ".").split(".") if x]
+                found = stems.get(segments[-1], []) if segments else []
+                if len(found) > 1 and len(segments) > 1:
+                    # Several files share the name; the segment before it usually says
+                    # which directory was meant.
+                    parent = segments[-2]
+                    narrowed = [f for f in found if f"/{parent}/" in f or f.startswith(f"{parent}/")]
+                    if len(narrowed) == 1:
+                        found = narrowed
+                if len(found) == 1:
+                    cur.execute("UPDATE edges SET dst=?, resolution='resolved' "
+                                "WHERE rowid=?", (found[0], row["rowid"]))
+                    counts["resolved"] += 1
+                else:
+                    cur.execute("UPDATE edges SET dst=raw_dst, resolution=? WHERE rowid=?",
+                                ("ambiguous" if found else "external", row["rowid"]))
+                    counts["ambiguous" if found else "external"] += 1
+        return counts
+
+    def resolve_calls(self, repo: str, branch: str = "main") -> dict:
+        """Turn bare call targets into qualified names, using scope before name.
+
+        A parser sees `helper()` and can honestly report only the word. Which
+        declaration that is takes the whole repository, so it happens here, once, after
+        every file is in — not in the front end, which can only see one file.
+
+        **Name alone does not work at real scale.** On a 270-file repository `run` is
+        declared twenty-two times and `get` is called from 1,354 places. Matching on the
+        name left 91% of in-repo calls ambiguous, which made the cross-file traversal
+        this project exists for mostly empty. So the search runs narrowest first:
+
+        1. `self.x()` inside a class — that class, then any class in the same file.
+        2. Same file. A call with no receiver usually means something local.
+        3. A module this file imports that declares the name.
+        4. Declared exactly once in the whole repository.
+
+        Anything still matching several declarations keeps its bare target and is
+        counted as ambiguous. A missing edge makes an agent look; a wrong edge makes it
+        confident.
+        """
+        by_tail: dict[str, list[str]] = {}
+        by_file: dict[str, dict[str, str]] = {}
+        by_owner: dict[str, dict[str, str]] = {}
+        #: Only what a bare `name()` could reach — no methods.
+        plain_tail: dict[str, list[str]] = {}
+        plain_file: dict[str, dict[str, str]] = {}
+        #: Classes by the file that declares them, to tell a receiver naming a class
+        #: from one naming a module.
+        classes_in: dict[str, dict[str, str]] = {}
+        for row in self.db.execute(
+                "SELECT name, path, kind FROM symbols WHERE repo=? AND branch=? "
+                "AND kind IN ('Function','Method','Class')", (repo, branch)):
+            name, path = row["name"], row["path"]
+            tail = name.rsplit("::", 1)[-1]
+            bare = tail.rsplit(".", 1)[-1]
+            by_tail.setdefault(bare, []).append(name)
+            by_file.setdefault(path, {}).setdefault(bare, name)
+            if "." in tail:
+                owner = name.rsplit(".", 1)[0]          # path::Class
+                by_owner.setdefault(owner, {})[bare] = name
+            else:
+                # Reachable by a bare `name()`: a module-level function, or a class
+                # being constructed. A method is not — it needs a receiver, and
+                # treating one as reachable let the builtin `set(...)` resolve to
+                # `RuntimeConfig.set`.
+                plain_tail.setdefault(bare, []).append(name)
+                plain_file.setdefault(path, {}).setdefault(bare, name)
+                if row["kind"] == "Class":
+                    classes_in.setdefault(path, {})[bare] = name
+
+        # module stem -> the file that defines it, for following an import
+        #: Which language each file is, so a name is never matched across one. A Java
+        #: test calling `put()` was resolving to a TypeScript `ApiClient.put`, because
+        #: the name was declared exactly once — in another language entirely.
+        language: dict[str, str] = {r["path"]: r["language"] for r in self.db.execute(
+            "SELECT path, language FROM files WHERE repo=? AND branch=?",
+            (repo, branch))}
+
+        imports: dict[str, set[str]] = {}
+        #: Per file, every name it imported and the repository file that name refers
+        #: to — or None for a standard-library or third-party import. That None is
+        #: what tells `sys.stdout.write` apart from `store.write`.
+        named: dict[str, dict[str, tuple[str | None, str]]] = {}
+        for row in self.db.execute(
+                "SELECT path, raw_dst, dst, resolution FROM edges WHERE repo=? AND "
+                "branch=? AND rel='IMPORTS'", (repo, branch)):
+            raw = str(row["raw_dst"] or "").lstrip("./").replace("/", ".")
+            leaf = raw.split(".")[-1]
+            root = raw.split(".")[0] or leaf
+            # The outcome matters as much as the path. An import that did not
+            # resolve because it is third-party is a different fact from one that did
+            # not resolve because two files in this repository share the name, and
+            # collapsing both to None made every call through the second look
+            # external — a claim we had no basis for.
+            target = row["dst"] if row["resolution"] == "resolved" else None
+            if target:
+                imports.setdefault(row["path"], set()).add(target)
+            for alias in {leaf, root}:
+                named.setdefault(row["path"], {}).setdefault(
+                    alias, (target, row["resolution"]))
+
+        methods = {name for names in by_owner.values() for name in names}
+        #: Classes grouped by the file that declares them. Both lookups below used to
+        #: scan every class in the repository for every call site — fine on a few
+        #: hundred files, and quadratic on seventeen thousand, where one index stopped
+        #: making progress entirely.
+        owners_in: dict[str, list[tuple[str, dict]]] = {}
+        for _owner, _members in by_owner.items():
+            owners_in.setdefault(_owner.split("::")[0], []).append((_owner, _members))
+        # `untyped` is not `external`: see `unplaced` below. Counting them
+        # together hid the difference the whole distinction exists to make.
+        counts = {"resolved": 0, "ambiguous": 0, "external": 0, "untyped": 0}
+        how: dict[str, int] = {}
+
+        def unplaced(bare: str) -> str:
+            """Why a call went unplaced — and the difference is a claim, not a label.
+
+            `external` says the callee is not declared in this repository. When the
+            receiver could not be typed we are in no position to say that: both real
+            `store.write(...)` call sites were reported external while `Store.write`
+            sat in the next file, so "who calls this" answered a confident nothing.
+            `untyped` says the true thing, which is that the question was not
+            answerable from the receiver we were given.
+            """
+            return "untyped" if (bare in methods or bare in plain_tail) else "external"
+
+        def pick(src: str, path: str, raw: str) -> tuple[str, str]:
+            """(qualified name, how it was found) — or ("", reason)."""
+            bare = raw.rsplit(".", 1)[-1]
+            mine = language.get(path)
+
+            if raw.startswith("self."):
+                owner = src.rsplit(".", 1)[0] if "." in src.rsplit("::", 1)[-1] else ""
+                if owner and bare in by_owner.get(owner, {}):
+                    return by_owner[owner][bare], "self"
+                for _other, members in owners_in.get(path, ()):
+                    if bare in members:
+                        return members[bare], "self-in-file"
+                # Not `ambiguous`: that word means several candidates share the name.
+                # Here there may be exactly one, and we still cannot say it is the one
+                # — the reason is the receiver, not the count.
+                return "", unplaced(bare)
+
+            if "." in raw:
+                # A method on a named receiver. Only the receiver says which one, so a
+                # receiver naming something outside this repository — `sys`, `json` —
+                # must not be matched on the method name alone.
+                root = raw.split(".")[0]
+                known = named.get(path, {})
+                if root in known:
+                    target, outcome = known[root]
+                    if target is None:
+                        # Third-party is knowable; ambiguous is not.
+                        return "", ("external" if outcome == "external"
+                                    else unplaced(bare))
+                    # `Store.save()` and `store.save()` are different questions. A
+                    # receiver naming a class puts that class's methods in scope; one
+                    # naming a module puts only the module's top level in scope — a
+                    # module attribute is never a method of a class that happens to
+                    # live in the same file.
+                    owner = classes_in.get(target, {}).get(root)
+                    if owner:
+                        members = by_owner.get(owner, {})
+                        if bare in members:
+                            return members[bare], "receiver"
+                        return "", unplaced(bare)
+                    if bare in plain_file.get(target, {}):
+                        return plain_file[target][bare], "receiver"
+                    # The alias names a module with no such top-level function. Either
+                    # the callee is elsewhere, or this name is a local shadowing the
+                    # module — and we cannot tell which.
+                    return "", unplaced(bare)
+
+                # `from store import Store` records only the module it came from, so
+                # `Store` is not a known alias — but it is a class in a file this one
+                # imports, which is enough to say whose method is being called.
+                owners = [classes_in[other][root] for other in imports.get(path, ())
+                          if root in classes_in.get(other, {})]
+                if len(owners) == 1:
+                    members = by_owner.get(owners[0], {})
+                    if bare in members:
+                        return members[bare], "imported-class"
+                    return "", unplaced(bare)
+                # An unknown receiver: a local, a parameter, a return value. We do not
+                # know its type, so we do not know whose method this is. Resolving on
+                # the name being unique is the guess this refuses everywhere else —
+                # `config.get("a")` is a dictionary in almost every file holding one.
+                return "", unplaced(bare)
+
+            # A bare call reaches a function or a class, never a method.
+            if bare in plain_file.get(path, {}):
+                return plain_file[path][bare], "same-file"
+            seen = [plain_file[other][bare] for other in imports.get(path, ())
+                    if bare in plain_file.get(other, {}) and language.get(other) == mine]
+            if len(seen) == 1:
+                return seen[0], "imported"
+            candidates = [c for c in plain_tail.get(bare, [])
+                          if language.get(c.split("::", 1)[0]) == mine]
+            if len(candidates) == 1:
+                return candidates[0], "unique"
+            return "", ("ambiguous" if candidates else unplaced(bare))
+
+        with self.db:
+            cur = self.db.cursor()
+            for row in self.db.execute(
+                    "SELECT rowid, src, path, raw_dst FROM edges WHERE repo=? AND "
+                    "branch=? AND rel='CALLS'", (repo, branch)).fetchall():
+                found, why = pick(row["src"], row["path"], row["raw_dst"])
+                if found:
+                    cur.execute("UPDATE edges SET dst=?, resolution='resolved' "
+                                "WHERE rowid=?", (found, row["rowid"]))
+                    counts["resolved"] += 1
+                    how[why] = how.get(why, 0) + 1
+                else:
+                    cur.execute("UPDATE edges SET dst=raw_dst, resolution=? "
+                                "WHERE rowid=?", (why, row["rowid"]))
+                    counts[why] += 1
+        counts["how"] = how
+        return counts
+
+    def link_layers(self, repo: str, branch: str = "main") -> dict:
+        """Join the ontologies. This is the pass that makes the graph worth building.
+
+        `code_ontology` alone is a better grep. What no single file states is the chain
+        an agent actually asks about — *which endpoint ends up writing which table* —
+        because the route handler never names a table and the model never names a route.
+
+        Two joins arrive free and one is derived:
+
+        * `HANDLED_BY` is emitted by the extractor. A route decorator sits on the
+          function in the tree, so endpoint and handler are connected by a fact.
+        * `MAPS_TO` likewise: `__tablename__` and `CREATE TABLE` say the name outright.
+        * `PERSISTS_TO` is inferred here, from a resolved call whose target is also an
+          entity. Constructing or querying a model is how ORM code touches a table, so
+          a function that calls `User(...)` almost certainly persists to `users`.
+
+        "Almost certainly" is the honest word, so these edges are tier `query` and never
+        `native`. An agent that wants only facts can filter them out; one that wants a
+        lead can follow them. What it must not do is mistake one for the other.
+        """
+        entities = {r["name"]: r["name"] for r in self.db.execute(
+            "SELECT name FROM symbols WHERE repo=? AND branch=? AND kind='Entity'",
+            (repo, branch))}
+        if not entities:
+            return {"persists_to": 0,
+                    "handled_by": self._count_rel(repo, branch, "HANDLED_BY"),
+                    "maps_to": self._count_rel(repo, branch, "MAPS_TO"),
+                    "configured_by": self.join_env(repo, branch),
+                "deployed_by": self.join_deploys(repo, branch)}
+
+        made = 0
+        with self.db:
+            cur = self.db.cursor()
+            cur.execute("DELETE FROM edges WHERE repo=? AND branch=? AND rel='PERSISTS_TO'",
+                        (repo, branch))
+            seen: set[tuple[str, str]] = set()
+            for row in self.db.execute(
+                    "SELECT DISTINCT src, dst, path FROM edges WHERE repo=? AND branch=? "
+                    "AND rel='CALLS' AND resolution='resolved'", (repo, branch)).fetchall():
+                target = entities.get(row["dst"])
+                if not target or (row["src"], target) in seen:
+                    continue
+                seen.add((row["src"], target))
+                cur.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (row["src"], "PERSISTS_TO", target, "query", "link",
+                             row["path"], target, "derived", repo, branch))
+                made += 1
+        return {"persists_to": made,
+                "handled_by": self._count_rel(repo, branch, "HANDLED_BY"),
+                "maps_to": self._count_rel(repo, branch, "MAPS_TO"),
+                "configured_by": self.join_env(repo, branch),
+                "deployed_by": self.join_deploys(repo, branch)}
+
+    def join_deploys(self, repo: str, branch: str = "main") -> int:
+        """Point an image's command at the module it actually starts.
+
+        `CMD ["uvicorn", "api:app"]` names `api`, and the Dockerfile has no way to know
+        whether this repository declares a module by that name. With every file in, it
+        does — and a `DEPLOYED_BY` edge answers *what ships this code*, which neither
+        the Dockerfile nor the module states on its own.
+        """
+        modules: dict[str, str] = {}
+        for row in self.db.execute(
+                "SELECT name, path FROM symbols WHERE repo=? AND branch=? "
+                "AND kind='Module'", (repo, branch)):
+            stem = row["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            modules.setdefault(stem, row["name"])
+
+        joined = 0
+        with self.db:
+            cur = self.db.cursor()
+            cur.execute("DELETE FROM edges WHERE repo=? AND branch=? AND rel='DEPLOYED_BY'",
+                        (repo, branch))
+            for row in self.db.execute(
+                    "SELECT rowid, src, raw_dst, path FROM edges WHERE repo=? AND branch=? "
+                    "AND rel='DEPLOYS' AND resolution='unresolved'",
+                    (repo, branch)).fetchall():
+                module = modules.get(row["raw_dst"])
+                if not module:
+                    # The command names a binary or an installed package, not code in
+                    # this repository. Correctly not a node here.
+                    cur.execute("UPDATE edges SET resolution='external' WHERE rowid=?",
+                                (row["rowid"],))
+                    continue
+                cur.execute("UPDATE edges SET dst=?, resolution='resolved' WHERE rowid=?",
+                            (module, row["rowid"]))
+                cur.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (module, "DEPLOYED_BY", row["src"], "query", "link",
+                             row["path"], row["src"], "derived", repo, branch))
+                joined += 1
+        return joined
+
+    def join_env(self, repo: str, branch: str = "main") -> int:
+        """Point every environment read at the manifest that declares that variable.
+
+        A `CONFIGURED_BY` edge arrives from the code side naming a bare variable —
+        `DATABASE_URL` — because a file that reads one cannot know who sets it. Here,
+        with every manifest in, the bare name is pointed at the declaration.
+
+        This is the join that answers *if I change this variable, what breaks*, which
+        no single file can answer: the manifest never names the code and the code never
+        names the manifest.
+        """
+        declared: dict[str, str] = {}
+        for row in self.db.execute(
+                "SELECT name, summary FROM symbols WHERE repo=? AND branch=? "
+                "AND kind='EnvVar'", (repo, branch)):
+            declared.setdefault(row["summary"] or row["name"].rsplit("::", 1)[-1],
+                                row["name"])
+        joined = 0
+        with self.db:
+            cur = self.db.cursor()
+            for row in self.db.execute(
+                    "SELECT rowid, raw_dst FROM edges WHERE repo=? AND branch=? "
+                    "AND rel='CONFIGURED_BY'", (repo, branch)).fetchall():
+                target = declared.get(row["raw_dst"])
+                if target:
+                    cur.execute("UPDATE edges SET dst=?, resolution='resolved' "
+                                "WHERE rowid=?", (target, row["rowid"]))
+                    joined += 1
+                else:
+                    # Read but never declared in this repository: set by the platform,
+                    # a secret store, or a developer's shell. Real, and correctly not a
+                    # node here — but worth being able to list.
+                    cur.execute("UPDATE edges SET resolution='undeclared' WHERE rowid=?",
+                                (row["rowid"],))
+        return joined
+
+    def env_usage(self, repo: str, branch: str = "main") -> list[dict]:
+        """Every environment variable, who declares it and who reads it."""
+        rows = self.db.execute(
+            "SELECT raw_dst AS name, path, resolution FROM edges "
+            "WHERE repo=? AND branch=? AND rel='CONFIGURED_BY' ORDER BY raw_dst",
+            (repo, branch)).fetchall()
+        out: dict[str, dict] = {}
+        for row in rows:
+            entry = out.setdefault(row["name"], {"name": row["name"], "read_by": [],
+                                                 "declared": row["resolution"] == "resolved"})
+            if row["path"] not in entry["read_by"]:
+                entry["read_by"].append(row["path"])
+        for name, entry in out.items():
+            entry["declared_in"] = [r["path"] for r in self.db.execute(
+                "SELECT DISTINCT path FROM symbols WHERE repo=? AND branch=? "
+                "AND kind='EnvVar' AND summary=?", (repo, branch, name))]
+        return sorted(out.values(), key=lambda e: e["name"])
+
+    def language_coverage(self, repo: str, branch: str = "main") -> list[dict]:
+        """Per language: files, symbols, and whether it produces call edges at all.
+
+        An agent cannot tell a thin graph from a complete one by querying it — both
+        answer, one just answers less. Only tier 1 emits calls today, so a repository
+        that is mostly TypeScript has a symbol list and no traversal, and nothing in
+        the rows says so.
+        """
+        out = []
+        for row in self.db.execute(
+                "SELECT language, COUNT(*) AS files FROM files WHERE repo=? AND branch=? "
+                "GROUP BY language ORDER BY files DESC", (repo, branch)):
+            paths = [r["path"] for r in self.db.execute(
+                "SELECT path FROM files WHERE repo=? AND branch=? AND language=?",
+                (repo, branch, row["language"]))]
+            marks = ",".join("?" * len(paths)) or "''"
+            symbols = self.db.execute(
+                f"SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=? "
+                f"AND path IN ({marks})", (repo, branch, *paths)).fetchone()[0]
+            calls = self.db.execute(
+                f"SELECT COUNT(*) FROM edges WHERE repo=? AND branch=? AND rel='CALLS' "
+                f"AND path IN ({marks})", (repo, branch, *paths)).fetchone()[0]
+            out.append({"language": row["language"], "files": row["files"],
+                        "symbols": symbols, "call_edges": calls,
+                        "traversable": calls > 0})
+        return out
+
+    def _absent(self, repo: str, branch: str, by_ontology: dict) -> list[str]:
+        with_edges = {r["ontology"] for r in self.db.execute(
+            "SELECT DISTINCT ontology FROM edges WHERE repo=? AND branch=?",
+            (repo, branch))}
+        found = set(by_ontology) | with_edges
+        return [name for name in ("code_ontology", "data_ontology", "api_ontology",
+                                  "deploy_ontology", "link") if name not in found]
+
+    def _count_rel(self, repo: str, branch: str, rel: str) -> int:
+        return self.db.execute(
+            "SELECT COUNT(*) FROM edges WHERE repo=? AND branch=? AND rel=?",
+            (repo, branch, rel)).fetchone()[0]
+
+    def trace(self, endpoint: str, repo: str, branch: str = "main") -> dict:
+        """Endpoint → handler → entity → table, in one walk.
+
+        The question this project exists to answer, and the one an agent would otherwise
+        answer by opening the router, then the handler, then the model, then guessing.
+        """
+        handlers = [r["dst"] for r in self.db.execute(
+            "SELECT dst FROM edges WHERE repo=? AND branch=? AND src=? AND rel='HANDLED_BY'",
+            (repo, branch, endpoint))]
+        chain = []
+        for handler in handlers:
+            entities = [r["dst"] for r in self.db.execute(
+                "SELECT dst FROM edges WHERE repo=? AND branch=? AND src=? "
+                "AND rel='PERSISTS_TO'", (repo, branch, handler))]
+            for entity in entities:
+                tables = [r["dst"] for r in self.db.execute(
+                    "SELECT dst FROM edges WHERE repo=? AND branch=? AND src=? "
+                    "AND rel='MAPS_TO'", (repo, branch, entity))]
+                chain.append({"handler": handler, "entity": entity, "tables": tables,
+                              "confidence": "derived — the handler calls the model"})
+            if not entities:
+                chain.append({"handler": handler, "entity": None, "tables": [],
+                              "confidence": "no persistence found from this handler"})
+        return {"endpoint": endpoint, "chain": chain}
+
+    def call_resolution(self, repo: str, branch: str = "main") -> dict:
+        return {r["resolution"]: r["n"] for r in self.db.execute(
+            "SELECT resolution, COUNT(*) AS n FROM edges WHERE repo=? AND branch=? "
+            "AND rel='CALLS' GROUP BY resolution", (repo, branch))}
 
     # ── reads, all scoped ──────────────────────────────────────────────────
 
-    def search(self, query: str, repo: str, branch: str = "main", limit: int = 20) -> list[dict]:
+    def search(self, query: str, repo: str = "", branch: str = "main",
+               limit: int = 20, ontology: str = "") -> list[dict]:
+        """Find symbols by name fragment. `repo` may be empty — see the tool doc."""
+        where, args = ["name LIKE ?"], [f"%{query}%"]
+        if repo:
+            where += ["repo=?", "branch=?"]; args += [repo, branch]
+        if ontology:
+            where.append("ontology=?"); args.append(ontology)
+        args.append(limit)
         rows = self.db.execute(
-            "SELECT name, kind, path, line, tier FROM symbols "
-            "WHERE repo=? AND branch=? AND name LIKE ? ORDER BY length(name) LIMIT ?",
-            (repo, branch, f"%{query}%", limit)).fetchall()
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch "
+            f"FROM symbols WHERE {' AND '.join(where)} ORDER BY length(name) LIMIT ?",
+            args).fetchall()
+        return [dict(r) for r in rows]
+
+    def definition(self, name: str, repo: str = "", branch: str = "main",
+                   ontology: str = "") -> dict | None:
+        """One symbol. `also_in` names the other ontologies that hold the same thing.
+
+        A model class is a Class and an Entity. Returning one and hiding the other would
+        let an agent ask what `User` is, be told "a class", and never learn it has a
+        table — which is usually the half of the answer it wanted.
+        """
+        where, args = ["name=?"], [name]
+        if repo:
+            where += ["repo=?", "branch=?"]; args += [repo, branch]
+        if ontology:
+            where.append("ontology=?"); args.append(ontology)
+        rows = self.db.execute(
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch "
+            f"FROM symbols WHERE {' AND '.join(where)} "
+            "ORDER BY CASE ontology WHEN 'code_ontology' THEN 0 ELSE 1 END", args).fetchall()
+        if not rows:
+            return None
+        found = dict(rows[0])
+        found["also_in"] = [{"ontology": r["ontology"], "kind": r["kind"],
+                             "summary": r["summary"]} for r in rows[1:]]
+        return found
+
+    def near_matches(self, name: str, limit: int = 5) -> list[dict]:
+        """Same trailing symbol name, anywhere. What you usually meant."""
+        tail = name.rsplit("::", 1)[-1]
+        rows = self.db.execute(
+            "SELECT name, kind, path, line, end_line, tier, ontology, repo, branch FROM symbols "
+            "WHERE name LIKE ? AND name <> ? ORDER BY length(name) LIMIT ?",
+            (f"%{tail}", name, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def in_file(self, path: str, repo: str, branch: str = "main") -> list[dict]:
+        """Every symbol declared in one file, in line order.
+
+        There was no such query, so the callers that needed one paged a name search and
+        filtered the page — which returned whatever happened to be in the first page and
+        called it the file. On the busiest file in a real repository that was 8 rows of
+        31, presented as the whole outline.
+        """
+        rows = self.db.execute(
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary "
+            "FROM symbols WHERE repo=? AND branch=? AND path=? ORDER BY line",
+            (repo, branch, path)).fetchall()
+        return [dict(r) for r in rows]
+
+    def importers_of(self, path: str, repo: str, branch: str = "main") -> list[str]:
+        """Files that import this one. Matched on the module, not on a substring.
+
+        `LIKE '%' || dst || '%'` made `build-pptx.py` import itself, because it imports
+        `pptx`. An import names a module; the comparison has to be against the module
+        this file *is*, not against any text that happens to contain it.
+        """
+        rows = self.db.execute(
+            "SELECT DISTINCT path FROM edges WHERE repo=? AND branch=? AND rel='IMPORTS' "
+            "AND resolution='resolved' AND dst=? AND path <> ?",
+            (repo, branch, path, path)).fetchall()
+        return sorted(r["path"] for r in rows)
+
+    def children(self, name: str, repo: str, branch: str = "main") -> list[dict]:
+        """What this symbol contains — a class's methods, a file's declarations."""
+        rows = self.db.execute(
+            "SELECT s.name, s.kind, s.line, s.end_line, s.tier, s.summary FROM edges e "
+            "JOIN symbols s ON s.name = e.dst AND s.repo = e.repo AND s.branch = e.branch "
+            "WHERE e.repo=? AND e.branch=? AND e.src=? AND e.rel='CONTAINS' "
+            "ORDER BY s.line", (repo, branch, name)).fetchall()
         return [dict(r) for r in rows]
 
     def neighbours(self, symbol: str, repo: str, branch: str = "main",
@@ -60,17 +738,26 @@ class Store:
         """One hop, both directions — the callee in another file, and the caller."""
         marks = ",".join("?" * len(rels))
         out = self.db.execute(
-            f"SELECT dst AS other, rel, 'out' AS dir FROM edges "
+            f"SELECT dst AS other, rel, tier, 'out' AS dir FROM edges "
             f"WHERE repo=? AND branch=? AND src=? AND rel IN ({marks}) "
             f"UNION ALL "
-            f"SELECT src AS other, rel, 'in' AS dir FROM edges "
+            f"SELECT src AS other, rel, tier, 'in' AS dir FROM edges "
             f"WHERE repo=? AND branch=? AND dst=? AND rel IN ({marks})",
             (repo, branch, symbol, *rels, repo, branch, symbol, *rels)).fetchall()
         return [dict(r) for r in out]
 
+    def files(self, repo: str, branch: str = "main", prefix: str = "",
+              limit: int = 500) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT path, language, tier, degraded FROM files "
+            "WHERE repo=? AND branch=? AND path LIKE ? ORDER BY path LIMIT ?",
+            (repo, branch, f"{prefix}%", limit)).fetchall()
+        return [dict(r) for r in rows]
+
     def repos(self) -> list[dict]:
         rows = self.db.execute(
-            "SELECT repo, branch, COUNT(*) AS files FROM files GROUP BY repo, branch").fetchall()
+            "SELECT repo, branch, COUNT(*) AS files FROM files "
+            "GROUP BY repo, branch ORDER BY repo, branch").fetchall()
         return [dict(r) for r in rows]
 
     def degraded(self, repo: str, branch: str = "main") -> list[dict]:
@@ -80,11 +767,91 @@ class Store:
             "WHERE repo=? AND branch=? AND degraded IS NOT NULL", (repo, branch)).fetchall()
         return [dict(r) for r in rows]
 
+    def coverage(self, repo: str, branch: str = "main", prefix: str = "") -> list[dict]:
+        """One row per child directory of `prefix`: files indexed, symbols declared."""
+        rows = self.db.execute(
+            "SELECT f.path, (SELECT COUNT(*) FROM symbols s "
+            "                WHERE s.repo=f.repo AND s.branch=f.branch AND s.path=f.path) AS n "
+            "FROM files f WHERE f.repo=? AND f.branch=? AND f.path LIKE ?",
+            (repo, branch, f"{prefix}%")).fetchall()
+        buckets: dict[str, dict] = {}
+        for row in rows:
+            rest = row["path"][len(prefix):]
+            head = rest.split("/", 1)[0] if "/" in rest else rest
+            b = buckets.setdefault(head, {"name": head, "files": 0, "definitions": 0})
+            b["files"] += 1
+            b["definitions"] += row["n"]
+        return sorted(buckets.values(), key=lambda b: -b["files"])
+
     def stats(self, repo: str, branch: str = "main") -> dict:
-        f = self.db.execute("SELECT COUNT(*) FROM files WHERE repo=? AND branch=?", (repo, branch)).fetchone()[0]
-        s = self.db.execute("SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=?", (repo, branch)).fetchone()[0]
-        e = self.db.execute("SELECT COUNT(*) FROM edges WHERE repo=? AND branch=?", (repo, branch)).fetchone()[0]
-        langs = self.db.execute("SELECT COUNT(DISTINCT language) FROM files WHERE repo=? AND branch=?", (repo, branch)).fetchone()[0]
+        one = lambda q: self.db.execute(q, (repo, branch)).fetchone()[0]   # noqa: E731
         tiers = {r["tier"]: r["n"] for r in self.db.execute(
-            "SELECT tier, COUNT(*) AS n FROM files WHERE repo=? AND branch=? GROUP BY tier", (repo, branch))}
-        return {"files": f, "symbols": s, "edges": e, "languages": langs, "tiers": tiers}
+            "SELECT tier, COUNT(*) AS n FROM files WHERE repo=? AND branch=? "
+            "GROUP BY tier", (repo, branch))}
+        by_ontology = {r["ontology"]: r["n"] for r in self.db.execute(
+            "SELECT ontology, COUNT(*) AS n FROM symbols WHERE repo=? AND branch=? "
+            "GROUP BY ontology", (repo, branch))}
+        return {
+            "files": one("SELECT COUNT(*) FROM files WHERE repo=? AND branch=?"),
+            "symbols": one("SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=?"),
+            "edges": one("SELECT COUNT(*) FROM edges WHERE repo=? AND branch=?"),
+            "languages": one("SELECT COUNT(DISTINCT language) FROM files "
+                             "WHERE repo=? AND branch=?"),
+            "tiers": tiers,
+            "by_ontology": by_ontology,
+        }
+
+    def health(self, repo: str, branch: str = "main") -> dict:
+        """How much of this index was read, and how much was guessed.
+
+        An agent that cannot see the gaps will answer over them, so this is a tool and
+        not a log line. `parsed_share` below 1.0 means some of the graph is a language
+        model's reading of code it could not parse, and should be treated as such.
+        """
+        marks = ",".join("?" * len(PARSED_TIERS))
+        total = self.db.execute(
+            "SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=?",
+            (repo, branch)).fetchone()[0]
+        parsed = self.db.execute(
+            f"SELECT COUNT(*) FROM symbols WHERE repo=? AND branch=? AND tier IN ({marks})",
+            (repo, branch, *PARSED_TIERS)).fetchone()[0]
+        gaps = self.degraded(repo, branch)
+        stats = self.stats(repo, branch)
+        calls = self.call_resolution(repo, branch)
+        return {
+            "repo": repo, "branch": branch,
+            "files": stats["files"], "symbols": total, "edges": stats["edges"],
+            "by_ontology": stats["by_ontology"],
+            "parsed_symbols": parsed,
+            "inferred_symbols": total - parsed,
+            "parsed_share": round(parsed / total, 3) if total else 1.0,
+            "call_edges": calls,
+            "links": {rel: self._count_rel(repo, branch, rel)
+                      for rel in ("HANDLED_BY", "PERSISTS_TO", "MAPS_TO",
+                                  "DEPLOYED_BY", "CONFIGURED_BY")},
+            "env_read_but_undeclared": [
+                e["name"] for e in self.env_usage(repo, branch) if not e["declared"]][:20],
+            "link_note": "PERSISTS_TO is derived from a resolved call to a model, so it "
+                         "is tier 'query' and a lead rather than a fact. HANDLED_BY and "
+                         "MAPS_TO come from declarations and are tier 'native'.",
+            "call_note": (
+                "resolved: the callee is known. "
+                "untyped: the receiver could not be typed — a local, a parameter or a "
+                "return value — so which declaration it means is unknown. This is the "
+                "usual outcome for `x.method()` and does NOT mean the callee is absent. "
+                "ambiguous: several same-named functions could be meant. "
+                "external: the callee is genuinely not declared in this repository. "
+                "A 'who calls this' answer is only as complete as `resolved`; a large "
+                "untyped count means callers are missing, not that there are none."),
+            "languages": self.language_coverage(repo, branch),
+            "language_note": "a language with files but no call edges is read by a "
+                             "pattern, not a parser: it yields declarations only, so "
+                             "blast_radius, related_symbols and called_by will be empty "
+                             "for it",
+            "degraded_files": len(gaps),
+            "gaps": gaps[:20],
+            # An ontology is present if it has nodes OR edges. `link` declares no
+            # kinds at all — it only joins nodes other ontologies own — so counting
+            # symbols alone reported it absent while it was holding the graph together.
+            "ontologies_absent": self._absent(repo, branch, stats["by_ontology"]),
+        }

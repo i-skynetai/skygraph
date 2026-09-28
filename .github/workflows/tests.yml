@@ -21,5 +21,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Run the suite
+      - name: Run the suite — standard library only, which is the default install
+        run: python -m unittest discover -s tests -t . -v
+
+      # And again with the optional parsers, because the tier that reads every
+      # language other than Python only runs when they are present. Skipped tests
+      # are not evidence, so both configurations are exercised.
+      - name: Install the optional parsers
+        run: python -m pip install --quiet '.[parsers]'
+
+      - name: Run the suite again, with the parser tier live
         run: python -m unittest discover -s tests -t . -v
