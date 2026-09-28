@@ -195,9 +195,13 @@ def init(project: str | os.PathLike, repo: str | None = None, db: str = DEFAULT_
               + written["codex_block"], file=out)
     if run_index:
         print(written["index"], file=out)
-        thin = [lang for lang, ok in written["languages"] if not ok]
+        # Only code languages: JSON, YAML and a Dockerfile never have calls, and telling
+        # someone to install parsers for them is advice that cannot be followed.
+        from .frontends import QUERY_LANGUAGES
+        thin = [lang for lang, ok in written["languages"]
+                if not ok and lang in QUERY_LANGUAGES]
         if thin:
-            print(f"languages without call edges: {', '.join(thin)} — declarations only; "
+            print(f"read by pattern, no call edges: {', '.join(thin)} — declarations only; "
                   "install the parsers (`pip install 'skygraph[parsers]'`) for calls", file=out)
     print("next: restart Claude Code in this project and ask it to run list_repos", file=out)
     return written
