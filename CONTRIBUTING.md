@@ -10,7 +10,7 @@ python3 -m unittest discover -s tests -t .                 # the default install
 Run it **both ways**. The parser tier only executes when tree-sitter is installed, and
 a skipped test is not evidence — CI runs the suite twice for the same reason.
 
-202 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
+205 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
 command CI runs, so a green run here is the run that matters.
 
 ## The benchmark
@@ -34,11 +34,12 @@ ceiling and the answer get re-checked then. Add a question here before adding a 
 
 ## Adding a language
 
-Most languages are a tier-2 front end and about twenty lines — see
-[docs/adding-a-language.md](docs/adding-a-language.md). Add the front end; do not touch
-the writer, the store or the query layer. If a change to the core seems necessary to
-support one language, that is the thing to discuss first, because it is usually a sign
-the capture vocabulary is wrong rather than too small.
+A language is a query file — `skygraph/queries/<language>.scm`, five captures — and a
+grammar name; see [docs/adding-a-language.md](docs/adding-a-language.md). Add the
+file; do not touch the interpreter, the writer, the store or the query layer. If a
+change to the core seems necessary to support one language, that is the thing to
+discuss first, because it is usually a sign the capture vocabulary is wrong rather than
+too small.
 
 ## What will be refused
 

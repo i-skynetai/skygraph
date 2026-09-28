@@ -13,6 +13,12 @@ classes with nothing to traverse. `blast_radius`, `related_symbols` and `called_
 empty and correct, which is the worst combination: an agent cannot tell a thin graph
 from a complete one by querying it.
 
+**One interpreter, one query file per language.** `queries/<language>.scm` names the
+node types that are containers, callables, bound functions, calls and imports — five
+captures — and this module never mentions a grammar's vocabulary. Adding a language is
+a query file and a grammar name; a wrong node type fails when the file is compiled,
+loudly, rather than matching nothing.
+
 **The receiver is kept, exactly as in Python.** `this.format()` becomes `self.format`
 and `sys.stdout.write()` stays `sys.stdout.write`, so the resolver treats every language
 by the same rules and a method on an unknown object is never guessed at.
@@ -20,6 +26,7 @@ by the same rules and a method on an unknown object is never guessed at.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from .schema import Edge, FileResult, Symbol
 
@@ -33,84 +40,26 @@ GRAMMAR = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx",
            "java": "java", "go": "go", "rust": "rust", "csharp": "csharp",
            "ruby": "ruby", "php": "php", "kotlin": "kotlin", "swift": "swift"}
 
-#: Per language: which node types declare a container, which declare something
-#: callable, and which are calls and imports. Node type names come from each grammar,
-#: so this is the one place a grammar's vocabulary appears.
-SPEC: dict[str, dict] = {
-    "typescript": {
-        "container": {"class_declaration": "Class", "abstract_class_declaration": "Class",
-                      "interface_declaration": "Class", "enum_declaration": "Class"},
-        "callable": {"method_definition": "Method", "function_declaration": "Function",
-                     "function_signature": "Function", "method_signature": "Method"},
-        "bound": ("variable_declarator", "public_field_definition"),
-        "call": ("call_expression", "new_expression"),
-        "import": ("import_statement",),
-    },
-    "java": {
-        "container": {"class_declaration": "Class", "interface_declaration": "Class",
-                      "enum_declaration": "Class", "record_declaration": "Class"},
-        "callable": {"method_declaration": "Method", "constructor_declaration": "Method"},
-        "bound": (),
-        "call": ("method_invocation", "object_creation_expression"),
-        "import": ("import_declaration",),
-    },
-    "go": {
-        "container": {"type_spec": "Class"},
-        "callable": {"function_declaration": "Function", "method_declaration": "Method"},
-        "bound": (),
-        "call": ("call_expression",),
-        "import": ("import_spec",),
-    },
-    "rust": {
-        "container": {"struct_item": "Class", "enum_item": "Class", "trait_item": "Class",
-                      "impl_item": "Class"},
-        "callable": {"function_item": "Function"},
-        "bound": (),
-        "call": ("call_expression", "macro_invocation"),
-        "import": ("use_declaration",),
-    },
-    "csharp": {
-        "container": {"class_declaration": "Class", "interface_declaration": "Class",
-                      "struct_declaration": "Class", "record_declaration": "Class"},
-        "callable": {"method_declaration": "Method", "constructor_declaration": "Method",
-                     "local_function_statement": "Function"},
-        "bound": (),
-        "call": ("invocation_expression", "object_creation_expression"),
-        "import": ("using_directive",),
-    },
-    "ruby": {
-        "container": {"class": "Class", "module": "Class"},
-        "callable": {"method": "Method", "singleton_method": "Method"},
-        "bound": (),
-        "call": ("call",),
-        "import": (),
-    },
-    "php": {
-        "container": {"class_declaration": "Class", "interface_declaration": "Class",
-                      "trait_declaration": "Class"},
-        "callable": {"method_declaration": "Method", "function_definition": "Function"},
-        "bound": (),
-        "call": ("function_call_expression", "member_call_expression",
-                 "object_creation_expression"),
-        "import": ("namespace_use_declaration",),
-    },
-    "kotlin": {
-        "container": {"class_declaration": "Class", "object_declaration": "Class"},
-        "callable": {"function_declaration": "Function"},
-        "bound": (),
-        "call": ("call_expression",),
-        "import": ("import_header",),
-    },
-    "swift": {
-        "container": {"class_declaration": "Class", "protocol_declaration": "Class"},
-        "callable": {"function_declaration": "Function"},
-        "bound": (),
-        "call": ("call_expression",),
-        "import": ("import_declaration",),
-    },
-}
-SPEC["javascript"] = SPEC["typescript"]
-SPEC["tsx"] = SPEC["typescript"]
+#: Where the per-language query files live. One file, five captures — see the module
+#: docstring. `tsx` reads the TypeScript file: the grammar differs, the vocabulary does not.
+QUERY_DIR = Path(__file__).parent / "queries"
+CAPTURES = ("container", "callable", "bound", "call", "import")
+_QUERIES: dict[str, object] = {}
+
+
+def query_file(language: str) -> Path:
+    return QUERY_DIR / f"{'typescript' if language == 'tsx' else language}.scm"
+
+
+def _query(language: str):
+    """The compiled query for a language. Compiled once; a bad node type raises here."""
+    if language not in _QUERIES:
+        from tree_sitter import Query
+        from tree_sitter_language_pack import get_language
+        _QUERIES[language] = Query(get_language(GRAMMAR[language]),
+                                   query_file(language).read_text(encoding="utf-8"))
+    return _QUERIES[language]
+
 
 #: `this` and `self` mean the enclosing class in every language here, and the resolver
 #: already knows what `self.` means. Normalising at the edge keeps one rule.
@@ -133,7 +82,7 @@ def available() -> bool:
 
 
 def claims(language: str) -> bool:
-    return available() and language in SPEC and language in GRAMMAR
+    return available() and language in GRAMMAR and query_file(language).is_file()
 
 
 def _parser(language: str):
@@ -217,15 +166,21 @@ def _module(node) -> str:
 
 def parse(path: str, source: str, language: str) -> FileResult:
     """One file, really parsed. Raises nothing the caller has to catch."""
-    spec = SPEC[language]
-    out = FileResult(path=path, language=language, tier="native")
-    out.symbols.append(Symbol(path, "Module", path, 1, 0, "native"))
-
+    from tree_sitter import QueryCursor
     # JSX is not TypeScript: the plain grammar marks a component body as an error
     # and the calls inside it vanish. Ninety-three of a hook's 109 callers were found
     # until a `.tsx` file was parsed as `.ts`; the rest were in components.
-    grammar = "tsx" if path.endswith(".tsx") and "tsx" in SPEC else language
+    grammar = "tsx" if path.endswith(".tsx") and "tsx" in GRAMMAR else language
+    out = FileResult(path=path, language=language, tier="native")
+    out.symbols.append(Symbol(path, "Module", path, 1, 0, "native"))
+
     tree = _parser(grammar).parse(source.encode("utf-8", "replace"))
+    # Which capture each node is in, by node id. One query run per file; the walk
+    # below then asks "what is this node" without knowing any grammar's vocabulary.
+    role: dict[int, str] = {}
+    for capture, nodes in QueryCursor(_query(grammar)).captures(tree.root_node).items():
+        for node in nodes:
+            role[node.id] = capture
     seen: set[str] = set()
 
     def declare(name: str, kind: str, node) -> str:
@@ -238,29 +193,28 @@ def parse(path: str, source: str, language: str) -> FileResult:
         return qualified
 
     def walk(node, owner: str, enclosing: str) -> None:
-        kind = spec["container"].get(node.type)
-        if kind:
+        what = role.get(node.id)
+        if what == "container":
             name = _name_of(node)
             if name:
-                qualified = declare(name, kind, node)
+                qualified = declare(name, "Class", node)
                 out.edges.append(Edge(owner or path, "CONTAINS", qualified, "native"))
                 for child in node.children:
                     walk(child, qualified, enclosing)
                 return
 
-        kind = spec["callable"].get(node.type)
-        if kind:
+        elif what == "callable":
             name = _name_of(node)
             if name:
                 inside = owner and owner != path
                 full = f"{owner.split('::', 1)[-1]}.{name}" if inside else name
-                qualified = declare(full, kind if inside else "Function", node)
+                qualified = declare(full, "Method" if inside else "Function", node)
                 out.edges.append(Edge(owner or path, "CONTAINS", qualified, "native"))
                 for child in node.children:
                     walk(child, owner, qualified)
                 return
 
-        if node.type in spec.get("bound", ()):
+        elif what == "bound":
             # `const handler = () => {...}` — the name is on the binding, not the
             # function, and modern TypeScript declares most of its code this way.
             value = node.child_by_field_name("value")
@@ -276,12 +230,12 @@ def parse(path: str, source: str, language: str) -> FileResult:
                         walk(child, owner, qualified)
                     return
 
-        if node.type in spec["call"] and enclosing:
+        elif what == "call" and enclosing:
             target = _callee(node)
             if target:
                 out.edges.append(Edge(enclosing, "CALLS", target, "native"))
 
-        if node.type in spec.get("import", ()):
+        elif what == "import":
             module = _module(node)
             if module:
                 out.edges.append(Edge(path, "IMPORTS", module, "native"))

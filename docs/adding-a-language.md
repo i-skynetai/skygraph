@@ -1,51 +1,53 @@
 # Adding a language
 
-Tier 2 takes about twenty lines and no change to anything downstream.
+A language is a query file and a grammar name. No Python.
 
-## The entry
+## Tier 1 — a real parse (tree-sitter)
 
-`skygraph/frontends.py`, in `QUERY_LANGUAGES`:
+`skygraph/queries/<language>.scm` names the node types of that grammar that play each
+of five roles. One interpreter in `treesitter.py` reads every file the same way:
 
-```python
-"elixir": {
-    "ext":    (".ex", ".exs"),
-    "class":  r"^\s*defmodule\s+([\w.]+)",
-    "func":   r"^\s*def\s+(\w+)",
-    "import": r"^\s*(?:import|alias|require)\s+([\w.]+)",
-},
+| Capture | Meaning | Becomes |
+|---|---|---|
+| `@container` | a named thing with members — class, interface, struct, enum, trait, impl, module | `Class` |
+| `@callable` | a function or method | `Function`, or `Method` when inside a container |
+| `@bound` | a name bound to a function value: `const handler = () => {}` | `Function` / `Method` |
+| `@call` | a call site; the callee text, receiver included, is read by the interpreter | a `CALLS` edge |
+| `@import` | an import; the module text is read by the interpreter | an `IMPORTS` edge |
+
+The whole Elixir entry would be:
+
+```scheme
+; skygraph/queries/elixir.scm
+(call) @call
 ```
 
-Four keys. `ext` is how the router claims a file; the other three are anchored regular
-expressions whose first group is the name.
+plus, in `treesitter.py`, one line in `GRAMMAR` naming the grammar the language pack
+provides. That is the whole change. The resolver, the store, the scoping and the MCP
+tools never learn a language exists.
 
-That is the whole change. The writer, the store, the scoping and the MCP tools already
-work — they never knew what a language was.
+A node type the grammar does not have fails when the file is compiled — at the first
+index, loudly — rather than matching nothing. `tests/test_skygraph.py` compiles every
+query file for every claimed grammar and parses a small snippet in each language,
+expecting a class, a callable and a call.
 
-## A test
+Nesting, qualified names (`path::Class.method`), `this`/`self` normalisation and
+receiver handling are the interpreter's job, not the query's. Keep the query to node
+types; if a language needs more than that, the interpreter is the place to discuss it.
 
-```python
-def test_elixir(self):
-    r = frontends.parse("m.ex", "defmodule Alpha do\n  def run do\n  end\nend\n")
-    self.assertEqual(r.tier, "query")
-    self.assertIn("m.ex::Alpha", {s.name for s in r.symbols})
-```
+## Tier 2 — the pattern floor
 
-## When tier 2 is not enough
-
-Go to tier 1 — a real parser — only when the language earns it: when patterns produce
-wrong answers rather than merely incomplete ones, or when you need types, positions or
-nested ownership that a line-oriented match cannot see.
-
-Tier 1 is a `_native_<language>` function returning the same `FileResult`. Everything
-downstream is unchanged, again.
+Without tree-sitter installed, `frontends.py::QUERY_LANGUAGES` holds one entry per
+language: an extension list and anchored regular expressions for a class, a function
+and an import. It finds declarations and cannot find calls, and `index_health` says
+so per language. Add an entry there too, so the language is read at all when the
+parsers are absent.
 
 ## What not to do
 
-**Do not widen the schema to fit a language.** If a construct has no home in the shared
-vocabulary, that is a decision about the vocabulary, made once and deliberately — not a
-new kind smuggled in by one front end. `schema.py` raises precisely to make that
-conversation happen.
+**Do not widen the schema to fit a language.** Five captures map onto the declared
+kinds; a construct with no home is a decision about the vocabulary, made once — not a
+sixth capture smuggled in by one file.
 
-**Do not let a pattern guess quietly.** If your front end cannot handle something, fall
-to the tier below and set `degraded`. An incomplete graph that says so is useful; one
-that does not is dangerous.
+**Do not let a pattern guess quietly.** A tier-2 entry that cannot read something must
+fall to the tier below and set `degraded`.

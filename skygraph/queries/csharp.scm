@@ -1,0 +1,11 @@
+; C#.
+(class_declaration) @container
+(interface_declaration) @container
+(struct_declaration) @container
+(record_declaration) @container
+(method_declaration) @callable
+(constructor_declaration) @callable
+(local_function_statement) @callable
+(invocation_expression) @call
+(object_creation_expression) @call
+(using_directive) @import

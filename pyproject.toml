@@ -44,3 +44,6 @@ skygraph-mcp = "skygraph.__main__:serve_entry"
 
 [tool.setuptools]
 packages = ["skygraph"]
+
+[tool.setuptools.package-data]
+skygraph = ["queries/*.scm"]

@@ -548,6 +548,52 @@ class TreeSitterIsTierOneWhenInstalled(_Indexed):
                         "a broken file lost the whole index")
 
 
+SNIPPETS = {
+    "typescript": "export class A {\n  m() { return f(); }\n}\nfunction f() { return 1; }\n",
+    "javascript": "class A {\n  m() { return f(); }\n}\nfunction f() { return 1; }\n",
+    "java": "public class A {\n  int m() { return f(); }\n  int f() { return 1; }\n}\n",
+    "go": "package p\ntype A struct{}\nfunc (a A) M() int { return F() }\nfunc F() int { return 1 }\n",
+    "rust": "struct A;\nimpl A {\n    fn m(&self) -> i32 { f() }\n}\nfn f() -> i32 { 1 }\n",
+    "csharp": "class A {\n  int M() { return F(); }\n  int F() { return 1; }\n}\n",
+    "ruby": "class A\n  def m\n    f()\n  end\nend\ndef f\n  1\nend\n",
+    "php": "<?php\nclass A {\n  function m() { return f(); }\n}\nfunction f() { return 1; }\n",
+    "kotlin": "class A {\n    fun m(): Int = f()\n}\nfun f(): Int = 1\n",
+    "swift": "class A {\n    func m() -> Int { return f() }\n}\nfunc f() -> Int { return 1 }\n",
+}
+
+
+class ALanguageIsAQueryFile(unittest.TestCase):
+    """Adding a language is a `.scm` file and a grammar name — no Python."""
+
+    def setUp(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+
+    def test_every_claimed_language_has_a_query_file_that_compiles(self):
+        for language in treesitter.GRAMMAR:
+            with self.subTest(language=language):
+                self.assertTrue(treesitter.query_file(language).is_file())
+                treesitter._query(language)          # raises on a bad node type
+
+    def test_every_query_file_names_only_the_five_captures(self):
+        import re
+        for path in sorted(treesitter.QUERY_DIR.glob("*.scm")):
+            found = set(re.findall(r"@([a-z]+)", path.read_text()))
+            self.assertTrue(found <= set(treesitter.CAPTURES), f"{path.name}: {found}")
+
+    def test_every_language_yields_a_class_a_function_and_a_call(self):
+        ext = {"typescript": "ts", "javascript": "js", "java": "java", "go": "go",
+               "rust": "rs", "csharp": "cs", "ruby": "rb", "php": "php", "kotlin": "kt",
+               "swift": "swift"}
+        for language, source in SNIPPETS.items():
+            with self.subTest(language=language):
+                result = treesitter.parse(f"a.{ext[language]}", source, language)
+                kinds = {s.kind for s in result.symbols}
+                self.assertIn("Class", kinds, language)
+                self.assertTrue({"Method", "Function"} & kinds, language)
+                self.assertTrue([e for e in result.edges if e.rel == "CALLS"], language)
+
+
 class EveryGrammarKeepsItsReceiver(_Indexed):
     """The 301-caller bug, reborn in a language that names its fields differently.
 

@@ -1,0 +1,10 @@
+; PHP.
+(class_declaration) @container
+(interface_declaration) @container
+(trait_declaration) @container
+(method_declaration) @callable
+(function_definition) @callable
+(function_call_expression) @call
+(member_call_expression) @call
+(object_creation_expression) @call
+(namespace_use_declaration) @import
