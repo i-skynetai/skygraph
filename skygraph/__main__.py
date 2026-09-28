@@ -26,6 +26,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model-budget", type=int, default=0,
                    help=f"most files to send in one run (default {DEFAULT_BUDGET})")
     p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--summary", action="store_true",
+                   help="one line instead of the JSON report (what a hook prints)")
+
+    p = sub.add_parser("init", help="wire a project to Claude Code and Codex, then index it")
+    p.add_argument("path"); p.add_argument("--repo")
+    p.add_argument("--no-hook", action="store_true", help="do not install the session-start hook")
+    p.add_argument("--codex", action="store_true", help="also write ~/.codex/config.toml")
+    p.add_argument("--no-index", action="store_true", help="write the config only")
+    p.add_argument("--db", default=DEFAULT_DB)
 
     p = sub.add_parser("search", help="find symbols by name")
     p.add_argument("query"); p.add_argument("--repo", required=True)
@@ -41,11 +50,26 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("serve", help="run the MCP server on stdio")
     p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--repo", default=None,
+                   help="the repository a tool means when the call names none")
+
+    p = sub.add_parser("ontologies", help="the five ontologies, as JSON — the shared definition")
 
     a = ap.parse_args(argv)
     if a.cmd == "index":
-        print(json.dumps(index(a.path, a.repo, a.branch, a.db, full=a.full,
-                                model=Model.from_environment(a.model_key, a.model_budget)), indent=2))
+        report = index(a.path, a.repo, a.branch, a.db, full=a.full,
+                       model=Model.from_environment(a.model_key, a.model_budget))
+        if a.summary:
+            from .install import summary_line
+            print(summary_line(report))
+        else:
+            print(json.dumps(report, indent=2))
+    elif a.cmd == "init":
+        from .install import init
+        init(a.path, a.repo, a.db, hook=not a.no_hook, codex=a.codex, run_index=not a.no_index)
+    elif a.cmd == "ontologies":
+        from .ontology import describe
+        print(json.dumps(describe(), indent=2))
     elif a.cmd == "search":
         print(json.dumps(Store(a.db).search(a.query, a.repo, a.branch), indent=2))
     elif a.cmd == "neighbours":
@@ -53,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "degraded":
         print(json.dumps(Store(a.db).degraded(a.repo, a.branch), indent=2))
     elif a.cmd == "serve":
-        mcp.serve(a.db)
+        mcp.serve(a.db, default_repo=a.repo)
     return 0
 
 
@@ -71,4 +95,6 @@ def serve_entry() -> None:
     import argparse
     ap = argparse.ArgumentParser(prog="skygraph-mcp")
     ap.add_argument("--db", default=DEFAULT_DB)
-    mcp.serve(ap.parse_args().db)
+    ap.add_argument("--repo", default=None)
+    a = ap.parse_args()
+    mcp.serve(a.db, default_repo=a.repo)

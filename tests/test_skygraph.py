@@ -516,7 +516,6 @@ class TreeSitterIsTierOneWhenInstalled(_Indexed):
         """Same rule as Python: an unknown receiver is never resolved."""
         self.write("widget.ts", TS_REAL)
         self.build()
-        resolved = {s for s, _ in self.rel("CALLS")}
         rows = self.store.db.execute(
             "SELECT raw_dst, resolution FROM edges WHERE rel='CALLS' "
             "AND raw_dst = 's.trim'").fetchall()
@@ -2004,6 +2003,104 @@ class ContextForIsOneCall(_Indexed):
         out = self.surface.context_for(self.store, {"qualified_name": "x.py::helper"})
         self.assertEqual(out["result"], {})
         self.assertTrue(out["near_matches"])
+
+
+class SkygraphInitWiresAProject(unittest.TestCase):
+    """Three commands on a fresh machine: install, `skygraph init`, restart the host."""
+
+    def setUp(self):
+        from skygraph import install
+        self.install = install
+        self.project = tempfile.mkdtemp()
+        self.db = os.path.join(tempfile.mkdtemp(), "g.db")
+        with open(os.path.join(self.project, "a.py"), "w") as fh:
+            fh.write("def go():\n    pass\n")
+        self.quiet = open(os.devnull, "w")
+
+    def tearDown(self):
+        self.quiet.close()
+
+    def test_it_writes_a_stdio_server_scoped_to_the_repo(self):
+        self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
+        cfg = json.load(open(os.path.join(self.project, ".mcp.json")))
+        server = cfg["mcpServers"]["skygraph"]
+        self.assertEqual(server["type"], "stdio")
+        self.assertTrue(server["command"].endswith("skygraph-mcp"))
+        self.assertEqual(server["args"][:2], ["--repo", "demo"])
+        self.assertTrue(os.path.isabs(server["command"]) or server["command"] == "skygraph-mcp")
+
+    def test_it_merges_with_an_existing_mcp_json(self):
+        with open(os.path.join(self.project, ".mcp.json"), "w") as fh:
+            json.dump({"mcpServers": {"other": {"type": "stdio", "command": "x"}}}, fh)
+        self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
+        cfg = json.load(open(os.path.join(self.project, ".mcp.json")))
+        self.assertEqual(set(cfg["mcpServers"]), {"other", "skygraph"})
+
+    def test_the_instruction_is_written_once_however_often_it_runs(self):
+        with open(os.path.join(self.project, "CLAUDE.md"), "w") as fh:
+            fh.write("# Mine\n\nkeep this\n")
+        for _ in range(3):
+            self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
+        text = open(os.path.join(self.project, "CLAUDE.md")).read()
+        self.assertEqual(text.count(self.install.MARK_START), 1)
+        self.assertIn("keep this", text)
+        self.assertIn("read the file directly", text, "the fallback contract is part of it")
+
+    def test_the_hook_runs_a_delta_index_on_session_start(self):
+        self.install.init(self.project, "demo", self.db, hook=True, out=self.quiet)
+        cfg = json.load(open(os.path.join(self.project, ".claude", "settings.json")))
+        entry = cfg["hooks"]["SessionStart"][0]
+        self.assertEqual(entry["matcher"], "startup|resume")
+        self.assertIn("--repo demo", entry["hooks"][0]["command"])
+        self.install.init(self.project, "demo", self.db, hook=True, out=self.quiet)
+        cfg = json.load(open(os.path.join(self.project, ".claude", "settings.json")))
+        self.assertEqual(len(cfg["hooks"]["SessionStart"]), 1, "not duplicated")
+
+    def test_it_indexes_and_reports_one_line(self):
+        written = self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
+        self.assertIn("demo", written["index"])
+        self.assertEqual(Store(self.db).repos()[0]["repo"], "demo")
+
+    def test_codex_block_is_offered_and_written_only_on_request(self):
+        written = self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
+        self.assertIn("[mcp_servers.skygraph]", written["codex_block"])
+        codex = os.path.join(tempfile.mkdtemp(), "config.toml")
+        with open(codex, "w") as fh:
+            fh.write("[other]\nx = 1\n")
+        self.install.init(self.project, "demo", self.db, hook=False, codex=True,
+                          codex_config=Path(codex), out=self.quiet)
+        text = open(codex).read()
+        self.assertIn("[other]", text)
+        self.assertEqual(text.count("[mcp_servers.skygraph]"), 1)
+
+
+class TheServerDefaultsToTheProjectRepo(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.mkdtemp()
+        self.db = os.path.join(tmp, "g.db")
+        for name in ("one", "two"):
+            d = os.path.join(tmp, name); os.makedirs(d)
+            with open(os.path.join(d, "a.py"), "w") as fh:
+                fh.write(f"def {name}_fn():\n    pass\n")
+            index(d, repo=name, db=self.db)
+        self.store = Store(self.db)
+
+    def _call(self, name, arguments, default=None):
+        out = mcp.handle(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                      "params": {"name": name, "arguments": arguments}}, default)
+        return json.loads(out["content"][0]["text"])
+
+    def test_a_call_without_a_repo_means_the_default(self):
+        got = self._call("find_symbols", {"query": "fn"}, default="one")
+        self.assertEqual([r["name"] for r in got["results"]], ["a.py::one_fn"])
+
+    def test_an_explicit_repo_still_wins(self):
+        got = self._call("find_symbols", {"query": "fn", "repo": "two"}, default="one")
+        self.assertEqual([r["name"] for r in got["results"]], ["a.py::two_fn"])
+
+    def test_without_a_default_every_repo_is_searched(self):
+        got = self._call("find_symbols", {"query": "fn"})
+        self.assertEqual(len(got["results"]), 2)
 
 
 class ImportDirectionIsMatchedOnTheModule(_Indexed):

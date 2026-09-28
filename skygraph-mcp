@@ -37,8 +37,18 @@ sys.path.insert(0, HERE)
 from skygraph import mcp                                          # noqa: E402
 from skygraph.__main__ import DEFAULT_DB                          # noqa: E402
 
+
+def _flag(name: str):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+
+
 if __name__ == "__main__":
-    db = DEFAULT_DB
-    if "--db" in sys.argv:
-        db = sys.argv[sys.argv.index("--db") + 1]
-    mcp.serve(db)
+    db = _flag("--db") or DEFAULT_DB
+    repo = _flag("--repo")
+    if "--index" in sys.argv:
+        # The session-start hook: a delta index, one line for the agent to read.
+        from skygraph.indexer import index
+        from skygraph.install import summary_line
+        print(summary_line(index(_flag("--index"), repo, "main", db)))
+        sys.exit(0)
+    mcp.serve(db, default_repo=repo)

@@ -292,6 +292,16 @@ code: the failure mode is empty, not wrong.
 ## Use
 
 ```bash
+pip install /path/to/skygraph           # or `pip install 'skygraph[parsers]'` for every language
+skygraph init /path/to/your/project     # .mcp.json, CLAUDE.md, a session-start hook, first index
+```
+
+Then restart Claude Code in the project. That is the whole install; [Connecting
+it](docs/connecting.md) has the long way and the Codex block.
+
+From a checkout, without installing:
+
+```bash
 git clone https://github.com/arupmmi07/skygraph.git
 cd skygraph
 
@@ -340,7 +350,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **217 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **226 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

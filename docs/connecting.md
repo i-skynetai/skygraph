@@ -3,6 +3,27 @@
 Two steps, and the second is a config file. Index a project, then tell the host where
 the server is.
 
+## The short way
+
+```bash
+pip install skygraph            # or: pip install /path/to/checkout
+skygraph init /path/to/your/project
+```
+
+`init` writes four things and indexes once:
+
+| Written | What it does |
+|---|---|
+| `.mcp.json` in the project | tells Claude Code how to start the server, scoped to this repository (`--repo`) |
+| `CLAUDE.md` (and `AGENTS.md` if present) | the paragraph that makes the agent reach for the graph before reading files, and the fallback rule for when the graph says it is unsure |
+| `.claude/settings.json` | a `SessionStart` hook: a delta index in seconds, and one line into the agent's context saying what changed and what is untyped (`--no-hook` to skip) |
+| Codex block | printed; `--codex` writes it into `~/.codex/config.toml` |
+
+Then restart Claude Code in the project and ask it to run `list_repos`. Running `init`
+again is safe: everything it writes is merged or replaced, never duplicated.
+
+The rest of this page is the long way, for hosts and setups `init` does not cover.
+
 ## 1. Index the project
 
 ```bash

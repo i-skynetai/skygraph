@@ -110,7 +110,11 @@ def negotiate(asked: str | None) -> str:
     return asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
 
 
-def handle(store: Store, req: dict) -> dict | None:
+def accepts_repo(name: str) -> bool:
+    return name in SURFACE and ("repo" in SURFACE[name][2] or "repo" in OPTIONAL.get(name, ()))
+
+
+def handle(store: Store, req: dict, default_repo: str | None = None) -> dict | None:
     """One request in, one response out — or None when nothing may be sent back."""
     if not isinstance(req, dict) or req.get("jsonrpc") != "2.0":
         raise ProtocolError(INVALID_REQUEST, "a request must be JSON-RPC 2.0")
@@ -138,8 +142,14 @@ def handle(store: Store, req: dict) -> dict | None:
         name = params.get("name")
         if not isinstance(name, str):
             raise ProtocolError(INVALID_PARAMS, "tools/call needs a tool name")
+        arguments = dict(params.get("arguments") or {})
+        # A server started for one project answers about that project unless told
+        # otherwise: `find_symbols` without a repo should not search every repository
+        # on the machine when the host was launched from inside one of them.
+        if default_repo and accepts_repo(name) and not arguments.get("repo"):
+            arguments["repo"] = default_repo
         try:
-            payload = call(store, name, params.get("arguments") or {})
+            payload = call(store, name, arguments)
         except KeyError as exc:
             # A missing argument and an unknown tool are both the caller's mistake,
             # and both are recoverable — say which, without a Python class name and
@@ -167,7 +177,7 @@ def _reply(out: dict) -> None:
     sys.stdout.flush()
 
 
-def serve(db: str = DEFAULT_DB) -> None:
+def serve(db: str = DEFAULT_DB, default_repo: str | None = None) -> None:
     store = Store(db)
     watched = _fingerprint(db)
     for line in sys.stdin:
@@ -195,7 +205,7 @@ def serve(db: str = DEFAULT_DB) -> None:
             watched = now
 
         try:
-            result = handle(store, req)
+            result = handle(store, req, default_repo)
         except ProtocolError as exc:
             if "id" not in req:
                 continue                       # still a notification: say nothing
