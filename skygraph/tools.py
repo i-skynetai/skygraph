@@ -1,4 +1,4 @@
-"""The thirteen tools, and the reasoning behind their shape.
+"""The fourteen tools, and the reasoning behind their shape.
 
 These are what a coding agent sees. The whole point of the project is that the agent
 should not read the repository to build context, so every tool here is shaped by one
@@ -24,6 +24,7 @@ tenths inferred by a language model is a different object from one that is nine 
 parsed, and nothing in the rows themselves says which you have.
 """
 from __future__ import annotations
+import json
 from pathlib import Path
 
 from .ontology import ONTOLOGIES, describe
@@ -53,6 +54,30 @@ def _rows(args: dict, default: int = 20) -> int:
     return max(1, min(MAX_ROWS, asked))
 
 
+#: Bytes `context_for` may return unless asked otherwise: about 1,500 tokens, which is
+#: the whole point of a bundle — one call, one budget, the far edges trimmed first.
+DEFAULT_BUDGET = 6_000
+
+
+def _compact(row: dict, scope: bool = True) -> dict:
+    """A row without what every other row in the list already said.
+
+    `repo` and `branch` are the same on every row of a scoped answer, `ontology` is
+    `code_ontology` nearly always, and an empty `summary` says nothing. On a real index
+    the five fields were a third of every list response.
+    """
+    out = {}
+    for key, value in row.items():
+        if key in ("repo", "branch") and scope:
+            continue
+        if key == "ontology" and value == "code_ontology":
+            continue
+        if key in ("summary", "degraded") and not value:
+            continue
+        out[key] = value
+    return out
+
+
 def _need(args: dict, key: str, tool: str):
     if key not in args or args[key] in (None, ""):
         raise KeyError(f"{tool} needs a {key!r} argument")
@@ -74,10 +99,12 @@ def find_symbols(store: Store, args: dict) -> dict:
     this is the one tool that works without a repo. Narrow it once you know.
     """
     query = _need(args, "query", "find_symbols")
-    asked = int(args.get("limit", 20)) if str(args.get("limit", 20)).lstrip("-").isdigit() else 20
-    found = store.search(query, args.get("repo", ""), args.get("branch", "main"),
-                         _rows(args), args.get("ontology", ""))
-    out = {"results": found}
+    repo, branch = args.get("repo", ""), args.get("branch", "main")
+    asked = int(args.get("limit", 10)) if str(args.get("limit", 10)).lstrip("-").isdigit() else 10
+    found = store.search(query, repo, branch, _rows(args, default=10), args.get("ontology", ""))
+    out: dict = {"results": [_compact(r, scope=bool(repo)) for r in found]}
+    if repo:
+        out.update(repo=repo, branch=branch)
     if asked > MAX_ROWS:
         out["note"] = f"limit capped at {MAX_ROWS}; narrow the query rather than paging"
     return out
@@ -87,7 +114,7 @@ def list_files(store: Store, args: dict) -> dict:
     repo = _need(args, "repo", "list_files")
     found = store.files(repo, args.get("branch", "main"), args.get("prefix", ""),
                         _rows(args, default=MAX_ROWS))
-    out = {"files": found}
+    out: dict = {"repo": repo, "files": [_compact(f) for f in found]}
     if len(found) == MAX_ROWS:
         out["note"] = (f"{MAX_ROWS} shown; use `prefix` to narrow, or map_coverage to "
                        "see the shape of the tree without listing it")
@@ -139,11 +166,20 @@ def expand_symbol(store: Store, args: dict) -> dict:
     scope = found["repo"], found["branch"]
     hops = store.neighbours(name, *scope)
     out = {"result": found,
-           "contains": store.children(name, *scope),
-           "calls": [h for h in hops if h["dir"] == "out"],
-           "called_by": [h for h in hops if h["dir"] == "in"]}
+           "contains": [_compact(c) for c in store.children(name, *scope)],
+           "calls": [_hop(h) for h in hops if h["dir"] == "out"],
+           "called_by": [_hop(h) for h in hops if h["dir"] == "in"]}
     if found["kind"] == "Endpoint":
         out["trace"] = store.trace(name, *scope)["chain"]
+    return out
+
+
+def _hop(hop: dict) -> dict:
+    """A neighbour without the direction the list already states, and without the
+    relation when it is the usual one."""
+    out = {"other": hop["other"], "tier": hop["tier"]}
+    if hop["rel"] != "CALLS":
+        out["rel"] = hop["rel"]
     return out
 
 
@@ -161,8 +197,8 @@ def outline_file(store: Store, args: dict) -> dict:
         return _not_indexed(repo, path)
     rows = store.in_file(found, repo, branch)
     return {"repo": repo, "filepath": found,
-            "signatures": [{k: r[k] for k in
-                            ("name", "kind", "line", "end_line", "tier", "summary")}
+            "signatures": [_compact({k: r[k] for k in
+                                     ("name", "kind", "line", "end_line", "tier", "summary")})
                            for r in rows]}
 
 
@@ -266,8 +302,9 @@ def file_imports(store: Store, args: dict) -> dict:
     path = found
     out: dict = {"repo": repo, "filepath": path, "direction": which}
     if which in ("imports", "both"):
-        out["imports"] = [r["dst"] for r in
-                          _import_edges(store, repo, branch, path, "imports")]
+        # `from x import a, b, c` is three edges to one file; say the file once.
+        out["imports"] = sorted({r["dst"] for r in
+                                 _import_edges(store, repo, branch, path, "imports")})
     if which in ("imported_by", "both"):
         out["imported_by"] = store.importers_of(path, repo, branch)
     return out
@@ -329,8 +366,65 @@ def index_health(store: Store, args: dict) -> dict:
     """How much of this index was read, how much was guessed, and what is missing."""
     repo = _need(args, "repo", "index_health")
     report = store.health(repo, args.get("branch", "main"))
-    report["ontology_reference"] = describe()
+    # Two kilobytes that never change, on every call. Ask for them once.
+    if args.get("reference"):
+        report["ontology_reference"] = describe()
+    else:
+        report["ontology_reference"] = "pass reference=true for the five ontologies"
     return report
+
+
+def context_for(store: Store, args: dict) -> dict:
+    """Everything an agent needs to start on one symbol, in one call, under one budget.
+
+    The definition, what its file declares, what the file imports, who calls it and
+    what it calls, and the endpoint → table trace when there is one. Five tools' worth
+    of round trips, and a round trip re-sends the whole conversation. Over budget, the
+    far edges go first — the long caller list — and the answer says what it dropped.
+    """
+    name = _need(args, "qualified_name", "context_for")
+    budget = max(1_000, int(args.get("budget", DEFAULT_BUDGET)))
+    found = store.definition(name, args.get("repo", ""), args.get("branch", "main"))
+    if not found:
+        return {"result": {}, "near_matches": store.near_matches(name)}
+    repo, branch, path = found["repo"], found["branch"], found["path"]
+    hops = store.neighbours(name, repo, branch)
+    outline = [{"name": r["name"].split("::", 1)[-1], "kind": r["kind"], "line": r["line"],
+                **({"summary": r["summary"]} if r["summary"] else {})}
+               for r in store.in_file(path, repo, branch) if r["kind"] != "Module"]
+    imports = [r["dst"] for r in store.db.execute(
+        "SELECT dst FROM edges WHERE repo=? AND branch=? AND rel='IMPORTS' AND src=? "
+        "AND resolution='resolved' ORDER BY dst", (repo, branch, path))]
+    coverage = next((c for c in store.language_coverage(repo, branch)
+                     if c["language"] == store.db.execute(
+                         "SELECT language FROM files WHERE repo=? AND branch=? AND path=?",
+                         (repo, branch, path)).fetchone()[0]), None)
+    out: dict = {"result": _compact(found, scope=False),
+                 "file": {"path": path, "outline": outline, "imports_in_repo": imports},
+                 "calls": [h["other"] for h in hops if h["dir"] == "out"],
+                 "called_by": [h["other"] for h in hops if h["dir"] == "in"]}
+    if found["kind"] == "Endpoint":
+        out["trace"] = store.trace(name, repo, branch)["chain"]
+    if coverage:
+        out["coverage"] = {"language": coverage["language"],
+                           "traversable": coverage["traversable"],
+                           "untyped_share": round(coverage["untyped"] /
+                                                  coverage["call_edges"], 2)
+                           if coverage["call_edges"] else None}
+    dropped: dict = {}
+    lists = [("called_by", out), ("calls", out), ("outline", out["file"]),
+             ("imports_in_repo", out["file"])]
+    # Measured as the wire sends it — indented — or the budget is a third too generous.
+    while len(json.dumps(out, indent=2)) > budget:
+        key, holder = max(lists, key=lambda kv: len(kv[1][kv[0]]))
+        if len(holder[key]) <= 5:
+            break
+        keep = len(holder[key]) // 2
+        dropped[key] = dropped.get(key, 0) + (len(holder[key]) - keep)
+        holder[key] = holder[key][:keep]
+    if dropped:
+        out["truncated"] = {k: f"{v} more; ask expand_symbol or blast_radius" for k, v in dropped.items()}
+    return out
 
 
 #: Name → (handler, one-line description, required arguments). The MCP layer turns this
@@ -359,6 +453,10 @@ TOOLS = {
     "read_source": (read_source,
         "The source of one symbol, read live off disk. The only tool that returns code.",
         ["qualified_name"]),
+    "context_for": (context_for,
+        "One call to start on a symbol: its definition, its file's outline and imports, "
+        "callers, callees, and the endpoint trace — under a byte budget, far edges "
+        "trimmed first.", ["qualified_name"]),
     "related_symbols": (related_symbols,
         "Everything adjacent to one symbol: file siblings, callees, callers, importers.",
         ["qualified_name"]),

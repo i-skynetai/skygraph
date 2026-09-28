@@ -116,6 +116,38 @@ class GoldenQuestionsPython(_Bench):
         traversable = {l["language"] for l in out["languages"] if l["traversable"]}
         self.assertEqual(traversable, {"python"})
 
+    def test_one_call_is_enough_to_start_on_a_symbol(self):
+        out = self.ask("context_for", 1_600, qualified_name="app/repo.py::find_user")
+        self.assertEqual(set(out["called_by"]),
+                         {"app/api.py::read_user", "app/service.py::Worker.run"})
+        self.assertEqual([o["name"] for o in out["file"]["outline"]],
+                         ["find_user", "get", "Registry", "Registry.register", "Registry.get"])
+        self.assertEqual(out["file"]["imports_in_repo"], ["app/models.py"])
+
+    def test_where_is_x_costs_no_more_than_the_grep_for_it(self):
+        """A grep for a unique name is about 130 bytes per hit. The answer to "where is
+        X" for a unique name must be one row, not ten rows of names containing X."""
+        out = self.ask("find_symbols", 400, query="find_user", repo="bench")
+        self.assertEqual(out["results"][0]["name"], "app/repo.py::find_user")
+
+    def test_the_median_answer_is_under_four_hundred_tokens(self):
+        sizes = []
+        for tool, args in (("find_symbols", {"query": "create_user"}),
+                           ("outline_file", {"filepath": "app/repo.py"}),
+                           ("expand_symbol", {"qualified_name": "app/api.py::POST /users"}),
+                           ("expand_symbol", {"qualified_name": "app/repo.py::find_user"}),
+                           ("blast_radius", {"symbol": "app/repo.py::find_user",
+                                             "direction": "up", "hops": 2}),
+                           ("file_imports", {"filepath": "app/repo.py", "direction": "both"}),
+                           ("read_source", {"qualified_name": "app/repo.py::find_user"}),
+                           ("context_for", {"qualified_name": "app/repo.py::find_user"}),
+                           ("index_health", {})):
+            args.setdefault("repo", "bench")
+            sizes.append(_size(T.TOOLS[tool][0](self.store, args)))
+        sizes.sort()
+        median = sizes[len(sizes) // 2]
+        self.assertLessEqual(median, 1_600, f"median {median} bytes ≈ {median // 4} tokens")
+
     def test_a_file_never_indexed_is_an_error(self):
         out = self.ask("outline_file", 400, filepath="app/nope.py")
         self.assertIn("error", out)

@@ -1922,6 +1922,90 @@ class AFileTheIndexHasNotSeenIsAnErrorNotAnEmptyAnswer(_Indexed):
         self.assertIn("more than one", out["error"])
 
 
+class AnswersCarryNoRepeatedFields(_Indexed):
+    """On a real index `repo`, `branch`, `ontology` and an empty `summary` were a third
+    of every list response, repeated on every row."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("a.py", '"""Module doc."""\n\n'
+                           "class Settings:\n    pass\n\n"
+                           "def set(x):\n    \"\"\"Store one value.\n\n    More.\"\"\"\n"
+                           "    return x\n\n"
+                           "def setup():\n    return set(1)\n")
+        self.build()
+        from skygraph import tools as surface
+        self.surface = surface
+
+    def test_the_exact_name_comes_first_not_the_shortest_containing_it(self):
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
+        self.assertEqual(out["results"][0]["name"], "a.py::set")
+        self.assertEqual([r["name"] for r in out["results"][:3]],
+                         ["a.py::set", "a.py::setup", "a.py::Settings"])
+
+    def test_a_scoped_list_says_the_scope_once(self):
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
+        self.assertEqual(out["repo"], "r")
+        for row in out["results"]:
+            self.assertNotIn("repo", row)
+            self.assertNotIn("ontology", row)
+
+    def test_an_unscoped_search_keeps_the_repo_on_each_row(self):
+        out = self.surface.find_symbols(self.store, {"query": "set"})
+        self.assertTrue(all("repo" in row for row in out["results"]))
+
+    def test_the_docstring_first_line_is_the_summary(self):
+        out = self.surface.outline_file(self.store, {"repo": "r", "filepath": "a.py"})
+        by_name = {r["name"].split("::")[-1]: r for r in out["signatures"]}
+        self.assertEqual(by_name["set"]["summary"], "Store one value.")
+        self.assertEqual(by_name["a.py"]["summary"], "Module doc.")
+        self.assertNotIn("summary", by_name["setup"], "an empty summary is not sent")
+
+    def test_the_default_limit_is_ten(self):
+        body = "".join(f"def set{i}():\n    pass\n" for i in range(30))
+        self.write("many.py", body)
+        self.build()
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
+        self.assertEqual(len(out["results"]), 10)
+
+    def test_health_reference_is_opt_in(self):
+        out = self.surface.index_health(self.store, {"repo": "r"})
+        self.assertIsInstance(out["ontology_reference"], str)
+        out = self.surface.index_health(self.store, {"repo": "r", "reference": True})
+        self.assertIsInstance(out["ontology_reference"], list)
+
+
+class ContextForIsOneCall(_Indexed):
+    def setUp(self):
+        super().setUp()
+        self.write("util.py", "def helper():\n    return 1\n")
+        callers = "".join(f"def call_helper_from_place_number_{i}():\n    return helper()\n"
+                          for i in range(40))
+        self.write("app.py", "from util import helper\n\n" + callers)
+        self.build()
+        from skygraph import tools as surface
+        self.surface = surface
+
+    def test_it_bundles_definition_file_callers_and_callees(self):
+        out = self.surface.context_for(self.store, {"qualified_name": "util.py::helper"})
+        self.assertEqual(out["result"]["name"], "util.py::helper")
+        self.assertEqual([o["name"] for o in out["file"]["outline"]], ["helper"])
+        self.assertEqual(len(out["called_by"]), 40)
+        self.assertEqual(out["coverage"]["language"], "python")
+
+    def test_over_budget_the_long_list_is_trimmed_and_it_says_so(self):
+        out = self.surface.context_for(self.store, {"qualified_name": "util.py::helper",
+                                                    "budget": 1_000})
+        self.assertLess(len(out["called_by"]), 40)
+        self.assertIn("called_by", out["truncated"])
+        self.assertLessEqual(len(json.dumps(out)), 1_400)
+
+    def test_a_miss_offers_near_matches(self):
+        out = self.surface.context_for(self.store, {"qualified_name": "x.py::helper"})
+        self.assertEqual(out["result"], {})
+        self.assertTrue(out["near_matches"])
+
+
 class ImportDirectionIsMatchedOnTheModule(_Indexed):
     def test_a_file_does_not_import_itself(self):
         """`LIKE '%' || dst || '%'` made build-pptx.py import itself, via `pptx`."""
@@ -2044,12 +2128,12 @@ class TheMcpProtocolIsHonoured(unittest.TestCase):
 
 
 class TheMcpSurfaceIsReadOnly(unittest.TestCase):
-    def test_thirteen_tools_and_none_of_them_write(self):
+    def test_fourteen_tools_and_none_of_them_write(self):
         names = {t["name"] for t in mcp.TOOLS}
         self.assertEqual(names, {
             "list_repos", "find_symbols", "list_files", "map_coverage",
             "describe_symbol", "expand_symbol", "outline_file", "read_source",
-            "related_symbols", "file_imports", "blast_radius",
+            "context_for", "related_symbols", "file_imports", "blast_radius",
             "repo_summary", "index_health"})
 
     def test_no_tool_changes_a_single_row(self):

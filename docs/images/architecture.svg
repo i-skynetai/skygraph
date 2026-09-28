@@ -30,7 +30,7 @@
   <text class="s" x="62" y="144">Brings the model and does the work. Holds no index and reads no folder to build context.</text>
 
   <path class="ln" d="M550,158 L550,186"/>
-  <text class="tag" x="564" y="178">13 read-only tools, over MCP · stdio locally, HTTP when hosted</text>
+  <text class="tag" x="564" y="178">14 read-only tools, over MCP · stdio locally, HTTP when hosted</text>
 
   <!-- tool surface -->
   <rect class="surf" x="40" y="190" width="1020" height="156" rx="10"/>

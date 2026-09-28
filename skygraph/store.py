@@ -899,12 +899,18 @@ class Store:
             where += ["repo=?", "branch=?"]; args += [repo, branch]
         if ontology:
             where.append("ontology=?"); args.append(ontology)
-        args.append(limit)
+        # The symbol whose own name is the query comes first, then names that start
+        # with it, then anything containing it. Ordered by length alone, `set` returned
+        # twenty rows of `Settings` and never `RuntimeConfig.set`.
+        rank = ("CASE WHEN name = ? OR name LIKE '%::' || ? OR name LIKE '%.' || ? THEN 0 "
+                "WHEN name LIKE '%::' || ? || '%' OR name LIKE '%.' || ? || '%' THEN 1 "
+                "ELSE 2 END")
+        args = [query] * 5 + args + [limit]
         rows = self.db.execute(
-            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch "
-            f"FROM symbols WHERE {' AND '.join(where)} ORDER BY length(name) LIMIT ?",
-            args).fetchall()
-        return [dict(r) for r in rows]
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch, "
+            f"{rank} AS rank FROM symbols WHERE {' AND '.join(where)} "
+            "ORDER BY rank, length(name), name LIMIT ?", args).fetchall()
+        return [{k: r[k] for k in r.keys() if k != "rank"} for r in rows]
 
     def definition(self, name: str, repo: str = "", branch: str = "main",
                    ontology: str = "") -> dict | None:

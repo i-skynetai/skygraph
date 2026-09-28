@@ -1,4 +1,4 @@
-"""An MCP server over stdio. Thirteen read-only tools; the index is never written here.
+"""An MCP server over stdio. Fourteen read-only tools; the index is never written here.
 
 The surface itself — what each tool does and why it is shaped that way — lives in
 `tools.py`. This module is only the protocol: framing, dispatch and errors. There is no
@@ -45,7 +45,12 @@ ARGUMENT = {
     "ontology":    {"type": "string", "enum": list(ONTOLOGIES), "description": "Limit to one ontology."},
     "direction":   {"type": "string", "description": "'imports', 'imported_by' or 'both'; for blast_radius, 'down', 'up' or 'both'."},
     "hops":        {"type": "integer", "default": 1, "description": "How many levels to walk (1-10)."},
-    "limit":       {"type": "integer", "default": 20},
+    "limit":       {"type": "integer", "default": 20,
+                    "description": "Rows to return; find_symbols defaults to 10. Capped at 200."},
+    "reference":   {"type": "boolean", "default": False,
+                    "description": "Include the five ontologies' definitions (about 2 KB)."},
+    "budget":      {"type": "integer", "default": 6000,
+                    "description": "Most bytes to return; long lists are trimmed first and the answer says so."},
 }
 
 #: Which optional arguments each tool accepts, beyond the ones it requires.
@@ -57,11 +62,12 @@ OPTIONAL = {
     "expand_symbol": ("repo", "branch"),
     "outline_file": ("branch",),
     "read_source": ("repo", "branch"),
+    "context_for": ("repo", "branch", "budget"),
     "related_symbols": ("repo", "branch"),
     "file_imports": ("branch", "direction"),
     "blast_radius": ("branch", "direction", "hops", "limit"),
     "repo_summary": ("branch",),
-    "index_health": ("branch",),
+    "index_health": ("branch", "reference"),
 }
 
 

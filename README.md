@@ -8,7 +8,7 @@
 *A graph of your code, for the agent reading it.*
 
 **Code intelligence for coding agents.** It indexes a repository once into a graph, and
-serves that graph to Claude Code, Codex or any MCP host through thirteen read-only
+serves that graph to Claude Code, Codex or any MCP host through fourteen read-only
 tools — so the agent stops rebuilding context out of your folder on every session.
 
 That is the whole argument. An agent with no index pays for rediscovery every time you
@@ -23,10 +23,10 @@ lives in a *different file*, and that is a graph query, not a text search.
 
 ## Where it sits
 
-![Skygraph between the agent and the repository: thirteen read-only tools over MCP, five
+![Skygraph between the agent and the repository: fourteen read-only tools over MCP, five
 ontologies, three extraction tiers, and an index refreshed by delta](docs/images/architecture.svg)
 
-## The thirteen tools
+## The fourteen tools
 
 Shaped by one question: does this let the agent take one fewer turn, or carry less text,
 than reading the folder would?
@@ -34,7 +34,7 @@ than reading the folder would?
 | | |
 |---|---|
 | **Find** | `find_symbols` · `list_repos` · `list_files` · `map_coverage` |
-| **Understand** | `describe_symbol` · `expand_symbol` · `outline_file` · `read_source` |
+| **Understand** | `describe_symbol` · `expand_symbol` · `outline_file` · `read_source` · `context_for` |
 | **Traverse** | `related_symbols` · `file_imports` · `blast_radius` |
 | **Trust** | `repo_summary` · `index_health` |
 
@@ -46,7 +46,7 @@ structure — names, kinds, line ranges, relations. An agent can locate a symbol
 shape, check its callers and decide it is the wrong one, for a few hundred tokens rather
 than a file.
 
-**Answer the whole question in one call.** `expand_symbol` and `related_symbols`
+**Answer the whole question in one call.** `context_for`, `expand_symbol` and `related_symbols`
 bundle what would otherwise be four or five round trips. A round trip re-sends the whole
 conversation, so a bundled answer is cheaper than the sum of its parts by a wide margin.
 
@@ -314,7 +314,7 @@ Indexing itself:
 ./skygraph-mcp
 ```
 
-Thirteen tools, all read-only. There is no write tool of any kind — indexing is a
+Fourteen tools, all read-only. There is no write tool of any kind — indexing is a
 separate, deliberate act, and an agent that could re-index could also quietly change
 what the next question sees.
 
@@ -340,7 +340,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **205 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **217 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

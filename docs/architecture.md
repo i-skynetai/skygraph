@@ -27,7 +27,7 @@ and is not a query-time concern.
 **Store.** SQLite. Three tables — `symbols`, `edges`, `files` — each carrying `repo` and
 `branch`, with indexes on the scoped lookups.
 
-**MCP.** Thirteen read-only tools over stdio JSON-RPC.
+**MCP.** Fourteen read-only tools over stdio JSON-RPC.
 
 ## Naming
 

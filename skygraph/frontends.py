@@ -240,7 +240,8 @@ def _end(node) -> int:
 def _native_python(path: str, source: str) -> FileResult:
     tree = ast.parse(source)
     out = FileResult(path=path, language="python", tier="native")
-    out.symbols.append(Symbol(path, "Module", path, 1, _end(tree), "native"))
+    out.symbols.append(Symbol(path, "Module", path, 1, _end(tree), "native",
+                              summary=_doc(tree)))
 
     def qualified(node, prefix: str) -> str:
         return f"{path}::{prefix}{node.name}" if prefix else f"{path}::{node.name}"
@@ -249,7 +250,8 @@ def _native_python(path: str, source: str) -> FileResult:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.ClassDef):
                 qn = qualified(child, prefix)
-                out.symbols.append(Symbol(qn, "Class", path, child.lineno, _end(child), "native"))
+                out.symbols.append(Symbol(qn, "Class", path, child.lineno, _end(child), "native",
+                                          summary=_doc(child)))
                 out.edges.append(Edge(owner or path, "CONTAINS", qn))
                 for base in child.bases:
                     if isinstance(base, ast.Name):
@@ -258,7 +260,8 @@ def _native_python(path: str, source: str) -> FileResult:
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 qn = qualified(child, prefix)
                 kind = "Method" if owner and "::" in owner and prefix else "Function"
-                out.symbols.append(Symbol(qn, kind, path, child.lineno, _end(child), "native"))
+                out.symbols.append(Symbol(qn, kind, path, child.lineno, _end(child), "native",
+                                          summary=_doc(child)))
                 out.edges.append(Edge(owner or path, "CONTAINS", qn))
                 for call in ast.walk(child):
                     if isinstance(call, ast.Call):
@@ -291,6 +294,21 @@ def _native_python(path: str, source: str) -> FileResult:
 
     walk(tree)
     return out
+
+
+def _doc(node) -> str:
+    """The first line of a docstring, or nothing.
+
+    It is what `outline_file` shows beside a name, and the reason an agent can pick the
+    right function without `read_source`: nine names cost nine lines; nine names with
+    what each one does cost nine lines and usually save a file.
+    """
+    try:
+        text = ast.get_docstring(node, clean=True) or ""
+    except TypeError:
+        return ""
+    first = text.strip().splitlines()[0].strip() if text.strip() else ""
+    return first[:100]
 
 
 def _call_name(node) -> str | None:
