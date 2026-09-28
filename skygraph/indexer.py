@@ -19,7 +19,8 @@ from .store import DEFAULT_DB, Store
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
              ".next", "target", "vendor", ".pytest_cache", ".mypy_cache", ".skygraph",
              "coverage", "htmlcov", ".nx", ".angular", ".gradle", ".idea", ".vscode",
-             ".tox", ".cache", "site-packages", "bower_components", "out", ".turbo"}
+             ".tox", ".cache", ".ruff_cache", "site-packages", "bower_components", "out",
+             ".turbo"}
 MAX_BYTES = 1_000_000
 
 

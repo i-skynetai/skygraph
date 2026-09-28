@@ -74,6 +74,7 @@ NOT_SOURCE = {
     ".jsonl", ".ndjson", ".parquet", ".avro", ".pickle", ".pkl", ".npy",
     ".html", ".htm", ".xhtml",                 # usually generated; never declarations
     ".mmd", ".mermaid", ".dot", ".puml",       # diagrams: text, not code
+    ".scm",                                    # tree-sitter queries: read by the parser, not indexed
     ".css", ".scss", ".less", ".plist", ".properties", ".ini", ".cfg", ".env",
 }
 
@@ -263,10 +264,16 @@ def _native_python(path: str, source: str) -> FileResult:
                 out.symbols.append(Symbol(qn, kind, path, child.lineno, _end(child), "native",
                                           summary=_doc(child)))
                 out.edges.append(Edge(owner or path, "CONTAINS", qn))
+                bound = _constructed_locals(child)
                 for call in ast.walk(child):
                     if isinstance(call, ast.Call):
                         target = _call_name(call.func)
                         if target:
+                            head, dot, rest = target.partition(".")
+                            if dot and head in bound and "." not in rest:
+                                # `registry = SkillRegistry()` then `registry.register()`:
+                                # the receiver's type is written two lines up.
+                                target = f"{bound[head]}.{rest}"
                             out.edges.append(Edge(qn, "CALLS", target))
                 walk(child, f"{prefix}{child.name}.", qn)
             elif isinstance(child, ast.Import):
@@ -309,6 +316,36 @@ def _doc(node) -> str:
         return ""
     first = text.strip().splitlines()[0].strip() if text.strip() else ""
     return first[:100]
+
+
+def _constructed_locals(fn) -> dict[str, str]:
+    """Locals bound from a constructor call, once, in this function: `x = Cls(...)`.
+
+    The one receiver type a parser can know without a type checker. A local assigned
+    from a bare class call and never reassigned is that class, so `x.m()` is `Cls.m`
+    and the resolver can place it. Anything assigned twice, or from anything other
+    than a bare name being called, is left untyped — `x = make()` says nothing.
+    """
+    seen: dict[str, str | None] = {}
+    for node in ast.walk(fn):
+        targets: list = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+            value = getattr(node, "value", None)
+        elif isinstance(node, (ast.For, ast.With, ast.comprehension)):
+            targets = [getattr(node, "target", None)] if hasattr(node, "target") else []
+            value = None
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            cls = (value.func.id if isinstance(value, ast.Call)
+                   and isinstance(value.func, ast.Name) and value.func.id[:1].isupper()
+                   else None)
+            seen[target.id] = None if target.id in seen else cls
+    return {name: cls for name, cls in seen.items() if cls}
 
 
 def _call_name(node) -> str | None:

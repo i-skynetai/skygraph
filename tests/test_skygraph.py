@@ -820,6 +820,33 @@ class AJavaClassSeesItsPackage(_Indexed):
         self.assertEqual(callers, ["svc/Publisher.java::Publisher.publish"])
 
 
+class ALocalBuiltFromAConstructorHasAType(_Indexed):
+    """`registry = SkillRegistry()` then `registry.register(...)`: the one receiver type
+    a parser can know. Three real call sites were untyped with the class two lines up."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("registry.py", "class SkillRegistry:\n    def register(self, s):\n"
+                                  "        pass\n    def get(self, k):\n        pass\n")
+        self.write("factory.py", "from registry import SkillRegistry\n\n"
+                                 "def build():\n    registry = SkillRegistry()\n"
+                                 "    registry.register(1)\n    return registry\n\n"
+                                 "def twice():\n    r = SkillRegistry()\n    r = other()\n"
+                                 "    return r.get(1)\n\n"
+                                 "def made():\n    r = make()\n    return r.get(1)\n")
+        self.build()
+
+    def test_the_call_reaches_the_class_method(self):
+        self.assertIn(("factory.py::build", "registry.py::SkillRegistry.register"),
+                      self.rel("CALLS"))
+
+    def test_a_reassigned_local_stays_untyped(self):
+        rows = {r["src"].split("::")[-1]: r["resolution"] for r in self.store.db.execute(
+            "SELECT src, resolution FROM edges WHERE rel='CALLS' AND raw_dst LIKE '%.get'")}
+        self.assertEqual(rows["twice"], "untyped")
+        self.assertEqual(rows["made"], "untyped")
+
+
 class UnplacedIsNotTheSameAsElsewhere(_Indexed):
     """`external` is a claim. It was being made without grounds.
 
@@ -2157,6 +2184,10 @@ class GeneratedOutputIsNotIndexed(_Indexed):
     def test_html_is_not_source(self):
         from skygraph import frontends
         self.assertFalse(frontends.unclaimed_source("coverage/index.html"))
+
+    def test_a_query_file_is_not_source(self):
+        from skygraph import frontends
+        self.assertFalse(frontends.unclaimed_source("skygraph/queries/java.scm"))
 
 
 class TheMcpProtocolIsHonoured(unittest.TestCase):
