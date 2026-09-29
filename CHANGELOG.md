@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Typed receivers: a field, parameter or local with a declared type (or built by a
+  constructor) types the calls on it, in every language that declares types; a local
+  built by a factory follows the factory's declared return type. Java's resolved share
+  of in-repository calls on a real monorepo: 17 % → 47 %; Python 53 % → 59 %.
+  Symbols carry `returns`; the index schema is version 7 and rebuilds.
+- Barrels are followed: `export … from` in TypeScript and the imports of a Python
+  `__init__.py` are `RE_EXPORTS` edges, and a name imported through one is bound to the
+  file that declares it.
+
 ## 0.2.0 — 2026-09-27
 
 The trust release: the graph stops answering confidently over a gap.

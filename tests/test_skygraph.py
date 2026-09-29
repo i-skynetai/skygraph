@@ -529,8 +529,9 @@ class TreeSitterIsTierOneWhenInstalled(_Indexed):
         rows = [(r["src"], r["raw_dst"], r["dst"], r["resolution"])
                 for r in self.store.db.execute(
                     "SELECT src, raw_dst, dst, resolution FROM edges WHERE rel='IMPORTS'")]
-        # `raw_dst` is the import as written; `dst` is the file it turned out to be.
-        self.assertIn(("widget.ts", "./thing"), [(r[0], r[1]) for r in rows])
+        # `raw_dst` is the import as written — module, and the name it binds; `dst`
+        # is the file it turned out to be.
+        self.assertIn(("widget.ts", "./thing"), [(r[0], r[1].partition("::")[0]) for r in rows])
         self.assertIn(("widget.ts", "thing.ts", "resolved"),
                       [(r[0], r[2], r[3]) for r in rows])
 
@@ -703,7 +704,7 @@ class ImportsResolveByPathNotByName(_Indexed):
         self.write("src/b.ts", "export const b = 1;\n")
         self.write("src/lib/index.ts", "export const c = 1;\n")
         self.build()
-        got = {r["raw_dst"]: r["dst"] for r in self.store.db.execute(
+        got = {r["raw_dst"].partition("::")[0]: r["dst"] for r in self.store.db.execute(
             "SELECT raw_dst, dst FROM edges WHERE rel='IMPORTS' AND path='src/a.ts'")}
         self.assertEqual(got, {"./b": "src/b.ts", "./lib": "src/lib/index.ts"})
 
@@ -767,6 +768,45 @@ class ImportsResolveByPathNotByName(_Indexed):
         self.assertEqual(got["svc1/app/main.py"], ("svc1/app/models.py", "resolved"))
         self.assertEqual(got["other/x.py"][1], "ambiguous")
         self.assertEqual(self.store.importers_of("svc2/app/models.py", "r"), [])
+
+
+class ABarrelForwardsWhatItExports(_Indexed):
+    """34 % of one monorepo's resolved imports land on an `index.ts` that declares
+    nothing and forwards everything. A name imported through it was untyped."""
+
+    def test_a_typescript_barrel_is_followed_to_the_declaring_file(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        os.makedirs(os.path.join(self.tmp, "libs", "x", "src", "lib"), exist_ok=True)
+        os.makedirs(os.path.join(self.tmp, "apps"), exist_ok=True)
+        self.write("tsconfig.json", '{"compilerOptions": {"baseUrl": ".", "paths": {"@lib/*": ["libs/*/src/index.ts"]}}}')
+        self.write("libs/x/src/index.ts", "export * from './lib/foo';\nexport { helper } from './lib/bar';\n")
+        self.write("libs/x/src/lib/foo.ts", "export class Foo {\n  m() { return 1; }\n}\n")
+        self.write("libs/x/src/lib/bar.ts", "export function helper() { return 2; }\n")
+        self.write("apps/a.ts", "import { Foo, helper } from '@lib/x';\n"
+                                "export function go(f: Foo) { f.m(); helper(); }\n")
+        self.build()
+        calls = self.rel("CALLS")
+        self.assertIn(("apps/a.ts::go", "libs/x/src/lib/foo.ts::Foo.m"), calls)
+        self.assertIn(("apps/a.ts::go", "libs/x/src/lib/bar.ts::helper"), calls)
+        self.assertIn(("libs/x/src/index.ts", "libs/x/src/lib/foo.ts"), self.rel("RE_EXPORTS"))
+
+    def test_an_imported_name_types_a_receiver_even_when_aliased(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("x.ts", "export class Foo {\n  m() { return 1; }\n}\n")
+        self.write("a.ts", "import { Foo as F } from './x';\n"
+                           "export function go() { const f = new F(); return f.m(); }\n")
+        self.build()
+        self.assertIn(("a.ts::go", "x.ts::Foo.m"), self.rel("CALLS"))
+
+    def test_a_python_package_init_forwards_its_imports(self):
+        os.makedirs(os.path.join(self.tmp, "pkg"), exist_ok=True)
+        self.write("pkg/__init__.py", "from .user import User\n")
+        self.write("pkg/user.py", "class User:\n    def save(self):\n        pass\n")
+        self.write("main.py", "from pkg import User\n\ndef go(u: User):\n    return u.save()\n")
+        self.build()
+        self.assertIn(("main.py::go", "pkg/user.py::User.save"), self.rel("CALLS"))
 
 
 class AJavaClassSeesItsPackage(_Indexed):

@@ -9,3 +9,5 @@
 (import_statement) @import
 ; `this.svc = new FooService()` in a constructor types the field.
 (assignment_expression) @binding
+; `export * from './x'` and `export { a } from './x'`: a barrel forwarding names.
+(export_statement) @reexport

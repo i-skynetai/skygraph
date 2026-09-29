@@ -302,8 +302,9 @@ def file_imports(store: Store, args: dict) -> dict:
     path = found
     out: dict = {"repo": repo, "filepath": path, "direction": which}
     if which in ("imports", "both"):
-        # `from x import a, b, c` is three edges to one file; say the file once.
-        out["imports"] = sorted({r["dst"] for r in
+        # `from x import a, b, c` is three edges to one file; say the file once — and
+        # an unresolved `react::useState` is the module `react`, once.
+        out["imports"] = sorted({r["dst"].partition("::")[0] for r in
                                  _import_edges(store, repo, branch, path, "imports")})
     if which in ("imported_by", "both"):
         out["imported_by"] = store.importers_of(path, repo, branch)

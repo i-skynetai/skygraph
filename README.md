@@ -142,6 +142,8 @@ left 91% of in-repo calls ambiguous. So the search runs narrowest first:
 | | Found by |
 |---|---|
 | `self.x()` inside a class | that class, then any class in the same file |
+| `svc.find()` on a field, parameter or local with a declared type, or built by a constructor | that class — in every language that declares types; `x = make()` follows `make`'s declared return type |
+| a name imported through a barrel (`index.ts`, `__init__.py`) | the file that actually declares it, following `RE_EXPORTS` |
 | `receiver.x()` where the receiver is an imported module | that module |
 | `receiver.x()` where the receiver is anything else | **nothing — left ambiguous** |
 | a bare `x()` | the same file, then an imported module, then a unique declaration |
@@ -350,7 +352,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **229 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **233 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

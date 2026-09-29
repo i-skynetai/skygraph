@@ -152,7 +152,8 @@ def _resolve_import(raw: str, importer: str, language: str, files: dict,
     case where guessing produced the wrong importers.
     """
     targets = IMPORT_TARGETS.get(language)
-    raw = (raw or "").strip()
+    # `./x::Foo` names the module and the name it binds; only the module is a path.
+    raw = (raw or "").strip().partition("::")[0].strip()
     if not targets or not raw:
         return "", "external"
     here = posixpath.dirname(importer)
@@ -425,7 +426,7 @@ class Store:
             cur = self.db.cursor()
             for row in self.db.execute(
                     "SELECT rowid, path, raw_dst FROM edges WHERE repo=? AND branch=? "
-                    "AND rel='IMPORTS'", (repo, branch)).fetchall():
+                    "AND rel IN ('IMPORTS', 'RE_EXPORTS')", (repo, branch)).fetchall():
                 found, why = _resolve_import(row["raw_dst"], row["path"],
                                              files.get(row["path"], ""), files,
                                              suffixes, aliases)
@@ -516,12 +517,23 @@ class Store:
         #: to — or None for a standard-library or third-party import. That None is
         #: what tells `sys.stdout.write` apart from `store.write`.
         named: dict[str, dict[str, tuple[str | None, str]]] = {}
+        #: `import { Foo as F }`: what `F` is called where it is declared.
+        original_of: dict[str, dict[str, str]] = {}
+
+        def declared_as(path: str, local: str) -> str:
+            return original_of.get(path, {}).get(local, local)
         for row in self.db.execute(
                 "SELECT path, raw_dst, dst, resolution FROM edges WHERE repo=? AND "
                 "branch=? AND rel='IMPORTS'", (repo, branch)):
-            raw = str(row["raw_dst"] or "").lstrip("./").replace("/", ".")
-            leaf = raw.split(".")[-1]
-            root = raw.split(".")[0] or leaf
+            spec, _sep, local = str(row["raw_dst"] or "").partition("::")
+            # `Foo as F`: the file is looked up by `Foo`, the code says `F`.
+            original, _as, alias_name = local.partition(" as ")
+            local = alias_name or original
+            if original and local != original:
+                original_of.setdefault(row["path"], {})[local] = original
+            raw = spec.lstrip("./").replace("/", ".")
+            leaf = local or raw.split(".")[-1]
+            root = local or raw.split(".")[0] or leaf
             # The outcome matters as much as the path. An import that did not
             # resolve because it is third-party is a different fact from one that did
             # not resolve because two files in this repository share the name, and
@@ -533,6 +545,39 @@ class Store:
             for alias in {leaf, root}:
                 named.setdefault(row["path"], {}).setdefault(
                     alias, (target, row["resolution"]))
+
+        #: What a barrel forwards: `export * from './x'`, and — by convention — every
+        #: import in a Python `__init__.py`. An alias imported from a barrel is bound
+        #: to the file that actually declares it, found by walking these.
+        forwards: dict[str, set[str]] = {}
+        for row in self.db.execute(
+                "SELECT path, dst FROM edges WHERE repo=? AND branch=? AND resolution='resolved' "
+                "AND (rel='RE_EXPORTS' OR (rel='IMPORTS' AND path LIKE '%__init__.py'))",
+                (repo, branch)):
+            forwards.setdefault(row["path"], set()).add(row["dst"])
+
+        def declares(file: str, name: str) -> bool:
+            return name in classes_in.get(file, {}) or name in plain_file.get(file, {})
+
+        def through_barrels(start: str, name: str) -> str | None:
+            """The file that declares `name`, reached from `start` by re-exports only."""
+            seen, queue = {start}, [start]
+            while queue:
+                file = queue.pop(0)
+                if declares(file, name):
+                    return file
+                for nxt in forwards.get(file, ()):
+                    if nxt not in seen and len(seen) < 64:
+                        seen.add(nxt); queue.append(nxt)
+            return None
+
+        for file, file_aliases in named.items():
+            for alias, (target, outcome) in list(file_aliases.items()):
+                wanted = declared_as(file, alias)
+                if target and not declares(target, wanted) and target in forwards:
+                    found = through_barrels(target, wanted)
+                    if found:
+                        file_aliases[alias] = (found, outcome)
 
         methods = {name for names in by_owner.values() for name in names}
         #: Classes grouped by the file that declares them. Both lookups below used to
@@ -571,8 +616,8 @@ class Store:
             if own:
                 return own
             target, _outcome = named.get(path, {}).get(name, (None, ""))
-            if target and name in classes_in.get(target, {}):
-                return classes_in[target][name]
+            if target and declared_as(path, name) in classes_in.get(target, {}):
+                return classes_in[target][declared_as(path, name)]
             owners = [classes_in[other][name] for other in imports.get(path, ())
                       if name in classes_in.get(other, {})]
             if len(owners) == 1:
@@ -650,7 +695,7 @@ class Store:
                     # naming a module puts only the module's top level in scope — a
                     # module attribute is never a method of a class that happens to
                     # live in the same file.
-                    owner = classes_in.get(target, {}).get(root)
+                    owner = classes_in.get(target, {}).get(declared_as(path, root))
                     if owner:
                         members = by_owner.get(owner, {})
                         if bare in members:
@@ -710,6 +755,9 @@ class Store:
             # A bare call reaches a function or a class, never a method.
             if bare in plain_file.get(path, {}):
                 return plain_file[path][bare], "same-file"
+            target, _outcome = named.get(path, {}).get(bare, (None, ""))
+            if target and declared_as(path, bare) in plain_file.get(target, {}):
+                return plain_file[target][declared_as(path, bare)], "imported"
             seen = [plain_file[other][bare] for other in imports.get(path, ())
                     if bare in plain_file.get(other, {}) and language.get(other) == mine]
             if len(seen) == 1:

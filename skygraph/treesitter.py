@@ -43,7 +43,7 @@ GRAMMAR = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx",
 #: Where the per-language query files live. One file, five captures — see the module
 #: docstring. `tsx` reads the TypeScript file: the grammar differs, the vocabulary does not.
 QUERY_DIR = Path(__file__).parent / "queries"
-CAPTURES = ("container", "callable", "bound", "call", "import", "binding")
+CAPTURES = ("container", "callable", "bound", "call", "import", "binding", "reexport")
 _QUERIES: dict[str, object] = {}
 
 
@@ -406,6 +406,36 @@ def _module(node) -> str:
     return text.split()[0].strip("\"'`") if text else ""
 
 
+def _import_names(node) -> list[str]:
+    """The local names an import binds: `import D, { a, b as c } from 'x'` → D, a, c.
+
+    An import edge that names only the module cannot type anything — `Foo.m()` needs
+    to know that `Foo` came from that module. So each bound name is recorded as
+    `module::name`, the way the Python front end records `pkg.name`.
+    """
+    names: list[str] = []
+    clause = next((c for c in node.children if c.type == "import_clause"), None)
+    if clause is None:
+        return names
+    for child in clause.children:
+        if child.type == "identifier":                          # default import
+            names.append(_text(child))
+        elif child.type == "namespace_import":                 # `* as ns`
+            ident = _first(child, {"identifier"})
+            if ident is not None:
+                names.append(_text(ident))
+        elif child.type == "named_imports":
+            for spec in child.children:
+                if spec.type == "import_specifier":
+                    name = spec.child_by_field_name("name")
+                    alias = spec.child_by_field_name("alias")
+                    if name is not None and alias is not None:
+                        names.append(f"{_text(name)} as {_text(alias)}")   # `Foo as F`
+                    elif name is not None:
+                        names.append(_text(name))
+    return names
+
+
 def parse(path: str, source: str, language: str) -> FileResult:
     """One file, really parsed. Raises nothing the caller has to catch."""
     from tree_sitter import QueryCursor
@@ -514,7 +544,17 @@ def parse(path: str, source: str, language: str) -> FileResult:
         elif what == "import":
             module = _module(node)
             if module:
-                out.edges.append(Edge(path, "IMPORTS", module, "native"))
+                names = _import_names(node) if node.type == "import_statement" else []
+                for name in names or [""]:
+                    out.edges.append(Edge(path, "IMPORTS",
+                                          f"{module}::{name}" if name else module, "native"))
+
+        elif what == "reexport" and node.child_by_field_name("source") is not None:
+            # A barrel. Its names come from elsewhere, and a file importing the barrel
+            # is really importing that elsewhere — the resolver follows this edge.
+            module = _text(node.child_by_field_name("source")).strip("\"'`")
+            if module:
+                out.edges.append(Edge(path, "RE_EXPORTS", module, "native"))
 
         for child in node.children:
             walk(child, owner, enclosing, fields, locals_)

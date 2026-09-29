@@ -44,7 +44,9 @@ CODE_ONTOLOGY = Ontology(
     name="code_ontology",
     purpose="the code as written: what is declared, what calls what, what imports what",
     kinds=("Module", "Class", "Function", "Method", "Variable"),
-    relations=("CONTAINS", "CALLS", "IMPORTS", "INHERITS"),
+    # RE_EXPORTS: a barrel — `export * from './x'`, or a Python `__init__` — passes a
+    # module's names on. Not an import: the barrel uses nothing, it forwards.
+    relations=("CONTAINS", "CALLS", "IMPORTS", "INHERITS", "RE_EXPORTS"),
     absent_means="no source file in this repository was readable by any tier",
 )
 
