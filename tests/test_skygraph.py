@@ -2026,6 +2026,13 @@ class ContextForIsOneCall(_Indexed):
         self.assertIn("called_by", out["truncated"])
         self.assertLessEqual(len(json.dumps(out)), 1_400)
 
+    def test_a_file_imported_three_times_is_listed_once(self):
+        self.write("three.py", "from util import helper\nfrom util import helper as h2\n"
+                               "import util\n\ndef go():\n    return helper()\n")
+        self.build()
+        out = self.surface.context_for(self.store, {"qualified_name": "three.py::go"})
+        self.assertEqual(out["file"]["imports_in_repo"], ["util.py"])
+
     def test_a_miss_offers_near_matches(self):
         out = self.surface.context_for(self.store, {"qualified_name": "x.py::helper"})
         self.assertEqual(out["result"], {})

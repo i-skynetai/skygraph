@@ -392,9 +392,10 @@ def context_for(store: Store, args: dict) -> dict:
     outline = [{"name": r["name"].split("::", 1)[-1], "kind": r["kind"], "line": r["line"],
                 **({"summary": r["summary"]} if r["summary"] else {})}
                for r in store.in_file(path, repo, branch) if r["kind"] != "Module"]
+    # `from x import a, b, c` is three edges to one file; say the file once.
     imports = [r["dst"] for r in store.db.execute(
-        "SELECT dst FROM edges WHERE repo=? AND branch=? AND rel='IMPORTS' AND src=? "
-        "AND resolution='resolved' ORDER BY dst", (repo, branch, path))]
+        "SELECT DISTINCT dst FROM edges WHERE repo=? AND branch=? AND rel='IMPORTS' "
+        "AND src=? AND resolution='resolved' ORDER BY dst", (repo, branch, path))]
     coverage = next((c for c in store.language_coverage(repo, branch)
                      if c["language"] == store.db.execute(
                          "SELECT language FROM files WHERE repo=? AND branch=? AND path=?",
