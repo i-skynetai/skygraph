@@ -283,13 +283,31 @@ def _path_aliases(root: str | None) -> list[tuple[str, list[str]]]:
     return []
 
 
+class IndexNewerThanServer(RuntimeError):
+    """The index was written by a newer skygraph than the one opening it.
+
+    Found when a refreshed index came back empty. A server started before an upgrade
+    was still running the old code; it reopened the file when the file changed, saw a
+    schema version it did not know, and "rebuilt" it — to nothing. An older index is
+    derived and can be rebuilt. A newer one is the work of newer code, and is left alone.
+    """
+
+    def __init__(self, path: str, found: int, known: int) -> None:
+        super().__init__(
+            f"the index at {path} was written by skygraph schema {found}, and this server "
+            f"knows schema {known}: it is running older code. Restart the skygraph MCP "
+            f"server (reopen the session, or restart the host). The index was left as it is.")
+        self.path, self.found, self.known = path, found, known
+
+
 class Store:
     #: True when opening this database discarded an index built by an older version.
     rebuilt: bool
 
     def __init__(self, path: str | Path = "code-index.db") -> None:
-        Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(Path(path).expanduser()))
+        self.path = str(Path(path).expanduser())
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.rebuilt = self._reset_if_stale()
         self.db.executescript(DDL)
@@ -300,6 +318,9 @@ class Store:
         found = self.db.execute("PRAGMA user_version").fetchone()[0]
         if found == SCHEMA_VERSION:
             return False
+        if found > SCHEMA_VERSION:
+            self.db.close()
+            raise IndexNewerThanServer(self.path, found, SCHEMA_VERSION)
         present = {r[0] for r in self.db.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         had_rows = any(t in present and self.db.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone()

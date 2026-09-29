@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse, json, sys
 from .indexer import index
 from .model import DEFAULT_BUDGET, Model
-from .store import Store
+from .store import IndexNewerThanServer, Store
 from . import mcp
 
 #: One store, not one per project. `list_repos` only means anything if several
@@ -14,6 +14,14 @@ from .store import DEFAULT_DB                                     # noqa: E402,F
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except IndexNewerThanServer as exc:
+        print(f"skygraph: {exc}", file=sys.stderr)
+        return 2
+
+
+def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="skygraph", description="Code intelligence for agents.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

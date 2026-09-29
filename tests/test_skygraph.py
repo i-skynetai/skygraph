@@ -233,6 +233,25 @@ class ReIndexingReplacesRatherThanAccumulates(unittest.TestCase):
         self.assertTrue(store.rebuilt, "the stale index was discarded without saying so")
         self.assertEqual(store.search("Alpha", "t"), [])
 
+    def test_an_index_from_a_newer_schema_is_refused_and_left_alone(self):
+        """A server still running older code must not "rebuild" a newer index to nothing."""
+        from skygraph.store import IndexNewerThanServer, SCHEMA_VERSION
+        self._index()
+        raw = sqlite3.connect(self.db)
+        raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(IndexNewerThanServer) as caught:
+            Store(self.db)
+        said = str(caught.exception)
+        self.assertIn(str(SCHEMA_VERSION + 1), said)
+        self.assertIn(str(SCHEMA_VERSION), said)
+        self.assertIn("restart", said.lower())
+        raw = sqlite3.connect(self.db)
+        self.assertTrue(raw.execute("SELECT 1 FROM symbols LIMIT 1").fetchone(),
+                        "the newer index was destroyed")
+        self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION + 1)
+
 
 class TheOntologiesAreTheContract(unittest.TestCase):
     def test_every_kind_belongs_to_exactly_one_ontology(self):
@@ -1149,6 +1168,49 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
         finally:
             proc.stdin.close()
             proc.wait(timeout=15)
+
+    def test_it_refuses_a_newer_index_and_says_to_restart(self):
+        """The server that wiped a real index had been started before an upgrade and
+        reopened the refreshed file with the old code. It must keep the handshake, keep
+        the tool list, and answer every tool call with the reason and the remedy."""
+        import subprocess
+        from skygraph.store import SCHEMA_VERSION
+        launcher = REPO / "skygraph-mcp"
+        if not launcher.is_file():
+            self.skipTest("no launcher in this checkout")
+        tmp = tempfile.mkdtemp()
+        db = os.path.join(tmp, "g.db")
+        with open(os.path.join(tmp, "one.py"), "w") as fh:
+            fh.write("def only_in_first():\n    pass\n")
+        index(tmp, repo="first", db=db)
+        raw = sqlite3.connect(db)
+        raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        raw.commit()
+        raw.close()
+
+        proc = subprocess.Popen([str(launcher), "--db", db], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, text=True, bufsize=1)
+        try:
+            def ask(req):
+                proc.stdin.write(json.dumps(req) + "\n")
+                proc.stdin.flush()
+                return json.loads(proc.stdout.readline())
+
+            self.assertIn("result", ask({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                         "params": {}}))
+            self.assertIn("result", ask({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+            answer = ask({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                          "params": {"name": "list_repos", "arguments": {}}})
+            self.assertIn("error", answer, answer)
+            said = answer["error"]["message"]
+            self.assertIn(str(SCHEMA_VERSION + 1), said)
+            self.assertIn("restart", said.lower())
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=15)
+        raw = sqlite3.connect(db)
+        self.assertTrue(raw.execute("SELECT 1 FROM symbols LIMIT 1").fetchone(),
+                        "the server destroyed a newer index")
 
 
 class ANameIsNeverMatchedAcrossALanguage(_Indexed):

@@ -49,6 +49,11 @@ if __name__ == "__main__":
         # The session-start hook: a delta index, one line for the agent to read.
         from skygraph.indexer import index
         from skygraph.install import summary_line
-        print(summary_line(index(_flag("--index"), repo, "main", db)))
+        from skygraph.store import IndexNewerThanServer
+        try:
+            print(summary_line(index(_flag("--index"), repo, "main", db)))
+        except IndexNewerThanServer as exc:
+            print(f"skygraph: {exc}")
+            sys.exit(2)
         sys.exit(0)
     mcp.serve(db, default_repo=repo)

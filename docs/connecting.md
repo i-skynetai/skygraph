@@ -156,6 +156,15 @@ line numbers, and look like it was working.
 
 Neither is a substitute for re-indexing. Both exist so that not doing so is visible.
 
+## After upgrading skygraph
+
+Restart the host, or reopen the session, so it starts a server from the new code. A
+server started before the upgrade keeps the old code in memory; when the index is
+rebuilt under it by the new code, it refuses to serve it and says so on every tool
+call — the two schema numbers and the word "restart" — rather than answering from an
+index it cannot read, and rather than rebuilding it. An index built by an older
+version is rebuilt on the next `skygraph index`, and the report says `rebuilt`.
+
 ## 3. Check the host can see it
 
 Ask the agent to run `list_repos`. It should come back with what you indexed. If

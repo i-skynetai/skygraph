@@ -19,7 +19,7 @@ import json, sys
 from pathlib import Path
 from . import __version__
 from .ontology import ONTOLOGIES
-from .store import DEFAULT_DB, Store
+from .store import DEFAULT_DB, IndexNewerThanServer, Store
 from .tools import TOOLS as SURFACE
 
 #: Versions this server speaks. The first is what it offers when it cannot agree.
@@ -177,8 +177,18 @@ def _reply(out: dict) -> None:
     sys.stdout.flush()
 
 
+def _open(db: str) -> Store | IndexNewerThanServer:
+    """The store — or the reason there is none. A server that dies on a bad index is
+    reported by the host as a closed pipe and nothing else; one that keeps answering
+    can say what is wrong and what to do."""
+    try:
+        return Store(db)
+    except IndexNewerThanServer as exc:
+        return exc
+
+
 def serve(db: str = DEFAULT_DB, default_repo: str | None = None) -> None:
-    store = Store(db)
+    store = _open(db)
     watched = _fingerprint(db)
     for line in sys.stdin:
         line = line.strip()
@@ -201,8 +211,16 @@ def serve(db: str = DEFAULT_DB, default_repo: str | None = None) -> None:
         # tree. It looks like it is working, which is why it has to be checked.
         now = _fingerprint(db)
         if now != watched:
-            store = Store(db)
+            store = _open(db)
             watched = now
+
+        # The handshake and the tool list need no index; a tool call does, and the
+        # answer is the reason and the remedy rather than an empty result.
+        if (isinstance(store, IndexNewerThanServer) and isinstance(req, dict)
+                and req.get("method") == "tools/call" and "id" in req):
+            _reply({"jsonrpc": "2.0", "id": rid,
+                    "error": {"code": INTERNAL_ERROR, "message": str(store)}})
+            continue
 
         try:
             result = handle(store, req, default_repo)

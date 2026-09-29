@@ -353,7 +353,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **260 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **262 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

@@ -7,6 +7,10 @@
   built by a factory follows the factory's declared return type. Java's resolved share
   of in-repository calls on a real monorepo: 17 % → 47 %; Python 53 % → 59 %.
   Symbols carry `returns`; the index schema is version 7 and rebuilds.
+- An index written by a newer skygraph is refused, not rebuilt. A server still running
+  older code keeps the handshake and the tool list, answers every tool call with the two
+  schema numbers and "restart", and leaves the file alone. Found when a refreshed index
+  came back empty: the old server had "rebuilt" it to nothing.
 - Barrels are followed: `export … from` in TypeScript and the imports of a Python
   `__init__.py` are `RE_EXPORTS` edges, and a name imported through one is bound to the
   file that declares it. A call on a destructured or untyped local is `untyped`, not
