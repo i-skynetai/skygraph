@@ -201,7 +201,7 @@ def _binding(node, language: str = "") -> tuple[str, str, bool]:
             name = base.split(".")[-1]
             value = node.child_by_field_name("right")
             kind = _constructed(value, language)
-            return (name, kind, True) if name and kind else ("", "", False)
+            return (name, kind, True) if name else ("", "", False)
     name = ""
     declarator = next((c for c in node.children if c.type == "variable_declarator"), None)
     if declarator is not None and declarator.child_by_field_name("name") is not None:
@@ -249,7 +249,7 @@ def _binding(node, language: str = "") -> tuple[str, str, bool]:
         if value is not None and value.type == "expression_list":
             value = value.children[0] if value.children else None
         kind = _constructed(value, language)
-    return (name, kind, instance) if kind else ("", "", False)
+    return name, kind, instance
 
 
 def _receiver_of(node) -> tuple[str, str]:
@@ -261,6 +261,18 @@ def _receiver_of(node) -> tuple[str, str]:
     if param is None:
         return "", ""
     return _text(param.child_by_field_name("name")), _type_name(param.child_by_field_name("type"))
+
+
+def _pattern_names(node) -> list[str]:
+    """Names bound by a destructuring pattern: `const { t, i18n } = useTranslation()`.
+    Their types are unknown; what matters is that they are locals, so a bare `t()`
+    is a call on a local and not a search of the repository for anything named `t`."""
+    pattern = node.child_by_field_name("name") or node.child_by_field_name("pattern")
+    if pattern is None or pattern.type not in ("object_pattern", "array_pattern",
+                                               "tuple_pattern", "list_pattern"):
+        return []
+    return [_text(n) for n in _descendants(pattern, {"shorthand_property_identifier_pattern",
+                                                      "identifier", "simple_identifier"})]
 
 
 def _return_type(node) -> str:
@@ -282,14 +294,18 @@ def _retype(target: str, locals_: dict, fields: dict) -> str:
     parts = target.split(".")
     if parts[0] in locals_ and locals_[parts[0]] == "self":
         parts[0] = "self"
-    if parts[0] == "self" and len(parts) == 3 and parts[1] in fields:
+    if parts[0] == "self" and len(parts) == 3 and fields.get(parts[1]):
         return f"{fields[parts[1]]}.{parts[2]}"
     if parts[0] == "self" and len(parts) == 2:
         return "self." + parts[1]
+    if len(parts) == 1 and locals_.get(target, None) == "":
+        # `t()` where `t` came from `const { t } = useTranslation()`: a call on a
+        # local, not a search of the repository for anything named `t`.
+        return f"(local).{target}"
     if len(parts) == 2 and not target.startswith("("):
-        if parts[0] in locals_:
+        if locals_.get(parts[0]):
             return f"{locals_[parts[0]]}.{parts[1]}"
-        if parts[0] in fields:
+        if fields.get(parts[0]):
             return f"{fields[parts[0]]}.{parts[1]}"
     return target
 
@@ -494,8 +510,11 @@ def parse(path: str, source: str, language: str) -> FileResult:
                 continue
             if what in ("binding", "bound"):
                 name, kind, instance = _binding(n, language)
-                if name and kind and name not in found and (instance or not in_callable):
-                    found[name] = kind
+                if name and name not in found and (instance or not in_callable):
+                    found[name] = kind                   # "" means: a local of unknown type
+                if not container:
+                    for local in _pattern_names(n):
+                        found.setdefault(local, "")
             stack.extend((c, in_callable) for c in reversed(n.children))
         return found
 

@@ -800,6 +800,22 @@ class ABarrelForwardsWhatItExports(_Indexed):
         self.build()
         self.assertIn(("a.ts::go", "x.ts::Foo.m"), self.rel("CALLS"))
 
+    def test_a_destructured_local_is_a_local_not_an_ambiguity(self):
+        """`const { t } = useTranslation(); t('x')` — 105 files declare something
+        called `t`, and the call was reported ambiguous among them."""
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("one.ts", "export const t = (k: string) => k;\n")
+        self.write("two.ts", "export const t = (k: string) => k + k;\n")
+        self.write("c.tsx", "import { useTranslation } from 'react-i18next';\n"
+                            "export const C = () => {\n  const { t } = useTranslation();\n"
+                            "  return <p>{t('hello')}</p>;\n};\n")
+        self.build()
+        rows = {r["raw_dst"]: r["resolution"] for r in self.store.db.execute(
+            "SELECT raw_dst, resolution FROM edges WHERE rel='CALLS' AND path='c.tsx'")}
+        self.assertEqual(rows.get("(local).t"), "untyped")
+        self.assertNotIn("t", rows)
+
     def test_a_python_package_init_forwards_its_imports(self):
         os.makedirs(os.path.join(self.tmp, "pkg"), exist_ok=True)
         self.write("pkg/__init__.py", "from .user import User\n")
