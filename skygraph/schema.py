@@ -36,6 +36,9 @@ class Symbol:
     tier: str = "native"
     #: Free-form, one line. What `describe_symbol` returns instead of source text.
     summary: str = ""
+    #: The declared return type of a callable, as a bare class name, or "". What lets
+    #: `x = make(); x.run()` reach `Foo.run` when `make` is declared to return a `Foo`.
+    returns: str = ""
 
     def __post_init__(self) -> None:
         ontology_of_kind(self.kind)             # raises if undeclared

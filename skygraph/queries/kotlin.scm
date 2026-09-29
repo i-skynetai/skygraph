@@ -4,3 +4,6 @@
 (function_declaration) @callable
 (call_expression) @call
 (import_header) @import
+(class_parameter) @binding
+(parameter) @binding
+(property_declaration) @binding

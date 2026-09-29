@@ -17,3 +17,10 @@
 (call_expression) @call
 (new_expression) @call
 (import_statement) @import
+; A name bound to a type: fields and parameters. `variable_declarator` is
+; already @bound; the interpreter treats one whose value is not a function as a binding.
+(public_field_definition) @binding
+(required_parameter) @binding
+(optional_parameter) @binding
+; `this.svc = new FooService()` in a constructor types the field.
+(assignment_expression) @binding

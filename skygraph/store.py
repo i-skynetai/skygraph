@@ -34,12 +34,12 @@ DEFAULT_DB = "~/.skygraph/index.db"
 
 #: Bumped when the table shape changes. An index is derived from source and is never the
 #: authority, so a change rebuilds it rather than migrating it — but it says so.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 DDL = """
 CREATE TABLE IF NOT EXISTS symbols (
   name TEXT, kind TEXT, path TEXT, line INTEGER, end_line INTEGER, tier TEXT,
-  ontology TEXT NOT NULL, summary TEXT,
+  ontology TEXT NOT NULL, summary TEXT, returns TEXT,
   repo TEXT NOT NULL, branch TEXT NOT NULL,
   -- The ontology is part of the identity. One name is often two things: a SQLAlchemy
   -- model is a Class in code_ontology and an Entity in data_ontology, and they are both
@@ -358,9 +358,9 @@ class Store:
                         (result.path, result.language, result.tier, result.degraded,
                          result.digest, repo, branch))
             for s in result.symbols:
-                cur.execute("INSERT OR REPLACE INTO symbols VALUES (?,?,?,?,?,?,?,?,?,?)",
+                cur.execute("INSERT OR REPLACE INTO symbols VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                             (s.name, s.kind, s.path, s.line, s.end_line, s.tier,
-                             s.ontology, s.summary, repo, branch))
+                             s.ontology, s.summary, s.returns, repo, branch))
             for e in result.edges:
                 cur.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?)",
                             (e.src, e.rel, e.dst, e.tier, e.ontology, result.path,
@@ -470,10 +470,16 @@ class Store:
         classes_in: dict[str, dict[str, str]] = {}
         dir_classes: dict[str, dict[str, str]] = {}
         class_names: set[str] = set()
+        #: Declared return types, for `x = make(); x.run()`.
+        returns_of: dict[str, str] = {}
+        #: Every class by bare name, for a typed receiver whose class is declared once.
+        class_by_bare: dict[str, list[str]] = {}
         for row in self.db.execute(
-                "SELECT name, path, kind FROM symbols WHERE repo=? AND branch=? "
+                "SELECT name, path, kind, returns FROM symbols WHERE repo=? AND branch=? "
                 "AND kind IN ('Function','Method','Class')", (repo, branch)):
             name, path = row["name"], row["path"]
+            if row["returns"]:
+                returns_of[name] = row["returns"]
             tail = name.rsplit("::", 1)[-1]
             bare = tail.rsplit(".", 1)[-1]
             by_tail.setdefault(bare, []).append(name)
@@ -495,6 +501,7 @@ class Store:
                     dir_classes.setdefault(_package_of(path), {}).setdefault(bare, name)
             if row["kind"] == "Class":
                 class_names.add(name)
+                class_by_bare.setdefault(bare, []).append(name)
 
         # module stem -> the file that defines it, for following an import
         #: Which language each file is, so a name is never matched across one. A Java
@@ -552,10 +559,62 @@ class Store:
             """
             return "untyped" if (bare in methods or bare in plain_tail) else "external"
 
+        def place_class(path: str, name: str, mine: str | None) -> str | None:
+            """The class a receiver type name means from this file, or None.
+
+            Same file, then an import alias, then a class in an imported file, then
+            the same package, then the one class in this language with that name.
+            A declared type is a strong claim — `FooService svc` names a class — so
+            the unique-class step is safe here where it is not for a bare method name.
+            """
+            own = classes_in.get(path, {}).get(name)
+            if own:
+                return own
+            target, _outcome = named.get(path, {}).get(name, (None, ""))
+            if target and name in classes_in.get(target, {}):
+                return classes_in[target][name]
+            owners = [classes_in[other][name] for other in imports.get(path, ())
+                      if name in classes_in.get(other, {})]
+            if len(owners) == 1:
+                return owners[0]
+            if mine in PACKAGE_SCOPED:
+                owner = dir_classes.get(_package_of(path), {}).get(name)
+                if owner:
+                    return owner
+            candidates = [c for c in class_by_bare.get(name, [])
+                          if language.get(c.split("::", 1)[0]) == mine]
+            return candidates[0] if len(candidates) == 1 else None
+
         def pick(src: str, path: str, raw: str) -> tuple[str, str]:
             """(qualified name, how it was found) — or ("", reason)."""
             bare = raw.rsplit(".", 1)[-1]
             mine = language.get(path)
+
+            if "()." in raw:
+                # `make().run`: a receiver typed by what a function is declared to
+                # return. Place the function, read its return type, place that class.
+                head, _sep, member = raw.partition("().")
+                fn = ""
+                owner = src.rsplit(".", 1)[0] if "." in src.rsplit("::", 1)[-1] else ""
+                if head.startswith("self."):
+                    fn = by_owner.get(owner, {}).get(head[len("self."):], "") if owner in class_names else ""
+                elif "." in head:
+                    cls = place_class(path, head.split(".")[0], mine)
+                    fn = by_owner.get(cls or "", {}).get(head.split(".")[-1], "")
+                elif (mine in IMPLICIT_THIS and owner in class_names
+                      and head in by_owner.get(owner, {})):
+                    fn = by_owner[owner][head]           # `Make()` inside the class is `this.Make()`
+                elif head in plain_file.get(path, {}):
+                    fn = plain_file[path][head]
+                else:
+                    seen = [plain_file[o][head] for o in imports.get(path, ())
+                            if head in plain_file.get(o, {})]
+                    fn = seen[0] if len(seen) == 1 else ""
+                rtype = returns_of.get(fn, "")
+                cls = place_class(path, rtype, mine) if rtype else None
+                if cls and member in by_owner.get(cls, {}):
+                    return by_owner[cls][member], "returns"
+                return "", unplaced(member)
 
             if raw.startswith("self."):
                 owner = src.rsplit(".", 1)[0] if "." in src.rsplit("::", 1)[-1] else ""
@@ -575,6 +634,11 @@ class Store:
                 # must not be matched on the method name alone.
                 root = raw.split(".")[0]
                 known = named.get(path, {})
+                if raw.count(".") == 1 and root in classes_in.get(path, {}):
+                    members = by_owner.get(classes_in[path][root], {})
+                    if bare in members:
+                        return members[bare], "same-file-class"
+                    return "", unplaced(bare)
                 if root in known:
                     target, outcome = known[root]
                     if target is None:
@@ -617,6 +681,17 @@ class Store:
                         members = by_owner.get(owner, {})
                         if bare in members:
                             return members[bare], "same-package"
+                        return "", unplaced(bare)
+                # A receiver written as a type name — the front end rewrote `svc.find`
+                # to `FooService.find` from the field's declaration — and that class is
+                # declared once in this language.
+                if raw.count(".") == 1 and root[:1].isupper():
+                    candidates = [c for c in class_by_bare.get(root, [])
+                                  if language.get(c.split("::", 1)[0]) == mine]
+                    if len(candidates) == 1:
+                        members = by_owner.get(candidates[0], {})
+                        if bare in members:
+                            return members[bare], "unique-class"
                         return "", unplaced(bare)
                 # An unknown receiver: a local, a parameter, a return value. We do not
                 # know its type, so we do not know whose method this is. Resolving on
@@ -907,7 +982,7 @@ class Store:
                 "ELSE 2 END")
         args = [query] * 5 + args + [limit]
         rows = self.db.execute(
-            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch, "
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, returns, repo, branch, "
             f"{rank} AS rank FROM symbols WHERE {' AND '.join(where)} "
             "ORDER BY rank, length(name), name LIMIT ?", args).fetchall()
         return [{k: r[k] for k in r.keys() if k != "rank"} for r in rows]
@@ -926,8 +1001,8 @@ class Store:
         if ontology:
             where.append("ontology=?"); args.append(ontology)
         rows = self.db.execute(
-            "SELECT name, kind, path, line, end_line, tier, ontology, summary, repo, branch "
-            f"FROM symbols WHERE {' AND '.join(where)} "
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, returns, "
+            f"repo, branch FROM symbols WHERE {' AND '.join(where)} "
             "ORDER BY CASE ontology WHEN 'code_ontology' THEN 0 ELSE 1 END", args).fetchall()
         if not rows:
             return None
@@ -954,7 +1029,7 @@ class Store:
         31, presented as the whole outline.
         """
         rows = self.db.execute(
-            "SELECT name, kind, path, line, end_line, tier, ontology, summary "
+            "SELECT name, kind, path, line, end_line, tier, ontology, summary, returns "
             "FROM symbols WHERE repo=? AND branch=? AND path=? ORDER BY line",
             (repo, branch, path)).fetchall()
         return [dict(r) for r in rows]

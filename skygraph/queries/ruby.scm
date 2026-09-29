@@ -4,3 +4,5 @@
 (method) @callable
 (singleton_method) @callable
 (call) @call
+; An instance variable or a local assigned from `Foo.new` is bound to that class.
+(assignment) @binding

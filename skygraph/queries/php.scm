@@ -8,3 +8,6 @@
 (member_call_expression) @call
 (object_creation_expression) @call
 (namespace_use_declaration) @import
+(property_declaration) @binding
+(simple_parameter) @binding
+(assignment_expression) @binding

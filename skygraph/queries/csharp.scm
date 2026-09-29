@@ -9,3 +9,6 @@
 (invocation_expression) @call
 (object_creation_expression) @call
 (using_directive) @import
+(field_declaration) @binding
+(parameter) @binding
+(local_declaration_statement) @binding

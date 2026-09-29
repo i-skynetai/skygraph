@@ -7,3 +7,6 @@
 (call_expression) @call
 (macro_invocation) @call
 (use_declaration) @import
+(field_declaration) @binding
+(parameter) @binding
+(let_declaration) @binding

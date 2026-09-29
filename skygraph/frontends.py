@@ -247,7 +247,9 @@ def _native_python(path: str, source: str) -> FileResult:
     def qualified(node, prefix: str) -> str:
         return f"{path}::{prefix}{node.name}" if prefix else f"{path}::{node.name}"
 
-    def walk(node, prefix: str = "", owner: str | None = None) -> None:
+    def walk(node, prefix: str = "", owner: str | None = None,
+             fields: dict | None = None) -> None:
+        fields = fields or {}
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.ClassDef):
                 qn = qualified(child, prefix)
@@ -257,25 +259,29 @@ def _native_python(path: str, source: str) -> FileResult:
                 for base in child.bases:
                     if isinstance(base, ast.Name):
                         out.edges.append(Edge(qn, "INHERITS", base.id))
-                walk(child, f"{child.name}.", qn)
+                walk(child, f"{child.name}.", qn, _class_fields(child))
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 qn = qualified(child, prefix)
                 kind = "Method" if owner and "::" in owner and prefix else "Function"
                 out.symbols.append(Symbol(qn, kind, path, child.lineno, _end(child), "native",
-                                          summary=_doc(child)))
+                                          summary=_doc(child),
+                                          returns=_annotation_name(child.returns)))
                 out.edges.append(Edge(owner or path, "CONTAINS", qn))
-                bound = _constructed_locals(child)
+                # What this function knows about its receivers: parameters by their
+                # annotation, locals by their annotation or the constructor that made
+                # them, and `self.x` by what the class assigned or declared it to be.
+                bound = {**_typed_params(child), **_constructed_locals(child)}
                 for call in ast.walk(child):
                     if isinstance(call, ast.Call):
                         target = _call_name(call.func)
                         if target:
-                            head, dot, rest = target.partition(".")
-                            if dot and head in bound and "." not in rest:
-                                # `registry = SkillRegistry()` then `registry.register()`:
-                                # the receiver's type is written two lines up.
-                                target = f"{bound[head]}.{rest}"
+                            parts = target.split(".")
+                            if len(parts) == 2 and parts[0] in bound:
+                                target = f"{bound[parts[0]]}.{parts[1]}"
+                            elif len(parts) == 3 and parts[0] == "self" and parts[1] in fields:
+                                target = f"{fields[parts[1]]}.{parts[2]}"
                             out.edges.append(Edge(qn, "CALLS", target))
-                walk(child, f"{prefix}{child.name}.", qn)
+                walk(child, f"{prefix}{child.name}.", qn, fields)
             elif isinstance(child, ast.Import):
                 for a in child.names:
                     out.edges.append(Edge(path, "IMPORTS", a.name))
@@ -297,7 +303,7 @@ def _native_python(path: str, source: str) -> FileResult:
                     if target:
                         out.edges.append(Edge(path, "IMPORTS", target))
             else:
-                walk(child, prefix, owner)
+                walk(child, prefix, owner, fields)
 
     walk(tree)
     return out
@@ -318,6 +324,84 @@ def _doc(node) -> str:
     return first[:100]
 
 
+def _annotation_name(node) -> str:
+    """The bare class name an annotation means: `Foo`, `pkg.Foo`, `Optional[Foo]`,
+    `list[Foo]`, `Foo | None`, `"Foo"`."""
+    if node is None:
+        return ""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.rsplit(".", 1)[-1].strip("'\"")
+    if isinstance(node, ast.Subscript):
+        outer = _annotation_name(node.value)
+        if outer in ("Optional", "list", "List", "set", "Set", "Sequence", "Iterable",
+                     "Iterator", "Type", "type", "Annotated", "ClassVar", "Final"):
+            inner = node.slice.elts[0] if isinstance(node.slice, ast.Tuple) and node.slice.elts \
+                else node.slice
+            return _annotation_name(inner)
+        return outer
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _annotation_name(node.left)
+        return left if left not in ("None",) else _annotation_name(node.right)
+    return ""
+
+
+def _class_fields(cls) -> dict[str, str]:
+    """`self.x = Cls(...)`, `self.x: T`, and class-body `x: T` — the receiver types a
+    class's methods can see. `self.x = make()` records `make()` so the resolver can
+    follow the factory's declared return type."""
+    fields: dict[str, str] = {}
+    for stmt in cls.body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            kind = _annotation_name(stmt.annotation)
+            if kind:
+                fields.setdefault(stmt.target.id, kind)
+    for node in ast.walk(cls):
+        target = value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+            if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                    and target.value.id == "self"):
+                kind = _annotation_name(node.annotation)
+                if kind:
+                    fields.setdefault(target.attr, kind)
+                    continue
+        if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                and target.value.id == "self"):
+            continue
+        kind = _value_type(value)
+        if kind:
+            fields.setdefault(target.attr, kind)
+    return fields
+
+
+def _value_type(value) -> str:
+    """What a value names about its own type: `Cls(...)` → Cls; `make(...)` → `make()`."""
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+        if value.func.id[:1].isupper():
+            return value.func.id
+        return f"{value.func.id}()"
+    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+            and isinstance(value.func.value, ast.Name) and value.func.value.id in ("self", "cls")):
+        return f"self.{value.func.attr}()"               # a factory method on this class
+    return ""
+
+
+def _typed_params(fn) -> dict[str, str]:
+    out: dict[str, str] = {}
+    args = fn.args
+    for a in args.posonlyargs + args.args + args.kwonlyargs:
+        kind = _annotation_name(a.annotation)
+        if kind:
+            out[a.arg] = kind
+    return out
+
+
 def _constructed_locals(fn) -> dict[str, str]:
     """Locals bound from a constructor call, once, in this function: `x = Cls(...)`.
 
@@ -332,6 +416,11 @@ def _constructed_locals(fn) -> dict[str, str]:
         if isinstance(node, ast.Assign):
             targets = node.targets
             value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            # `x: Foo = ...` — the annotation says the type, whatever the value is.
+            kind = _annotation_name(node.annotation)
+            seen[node.target.id] = None if node.target.id in seen else (kind or None)
+            continue
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
             targets = [node.target]
             value = getattr(node, "value", None)
@@ -341,9 +430,7 @@ def _constructed_locals(fn) -> dict[str, str]:
         for target in targets:
             if not isinstance(target, ast.Name):
                 continue
-            cls = (value.func.id if isinstance(value, ast.Call)
-                   and isinstance(value.func, ast.Name) and value.func.id[:1].isupper()
-                   else None)
+            cls = _value_type(value) or None
             seen[target.id] = None if target.id in seen else cls
     return {name: cls for name, cls in seen.items() if cls}
 

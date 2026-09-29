@@ -862,7 +862,9 @@ class UnplacedIsNotTheSameAsElsewhere(_Indexed):
         out = self.build()
         rows = {r["raw_dst"]: r["resolution"] for r in self.store.db.execute(
             "SELECT raw_dst, resolution FROM edges WHERE rel='CALLS'")}
-        self.assertEqual(rows["s.write"], "untyped")
+        # `s = make()` is recorded as `make().write`: a factory the resolver could
+        # follow, if `make` were declared with a return type. It is not, so: untyped.
+        self.assertEqual(rows["make().write"], "untyped")
         self.assertIn("untyped", out["calls"])
 
     def test_a_genuinely_third_party_call_still_says_external(self):

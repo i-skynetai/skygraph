@@ -8,3 +8,7 @@
 (method_invocation) @call
 (object_creation_expression) @call
 (import_declaration) @import
+; A name bound to a type: fields, parameters, typed locals.
+(field_declaration) @binding
+(formal_parameter) @binding
+(local_variable_declaration) @binding

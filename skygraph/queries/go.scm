@@ -5,3 +5,7 @@
 (method_declaration) @callable
 (call_expression) @call
 (import_spec) @import
+(field_declaration) @binding
+(parameter_declaration) @binding
+(var_spec) @binding
+(short_var_declaration) @binding

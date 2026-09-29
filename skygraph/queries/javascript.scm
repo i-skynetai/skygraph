@@ -7,3 +7,5 @@
 (call_expression) @call
 (new_expression) @call
 (import_statement) @import
+; `this.svc = new FooService()` in a constructor types the field.
+(assignment_expression) @binding
