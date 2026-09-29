@@ -293,7 +293,8 @@ def _native_python(path: str, source: str) -> FileResult:
                 walk(child, f"{prefix}{child.name}.", qn, fields)
             elif isinstance(child, ast.Import):
                 for a in child.names:
-                    out.edges.append(Edge(path, "IMPORTS", a.name))
+                    out.edges.append(Edge(path, "IMPORTS",
+                                          f"{a.name} as {a.asname}" if a.asname else a.name))
             elif isinstance(child, ast.ImportFrom):
                 # `from pkg import a, b` binds `a` and `b`, so each is recorded as
                 # `pkg.a`, `pkg.b`: the resolver finds `pkg/a.py` when `a` is a module
@@ -310,11 +311,22 @@ def _native_python(path: str, source: str) -> FileResult:
                     else:
                         target = f"{module}.{a.name}"
                     if target:
-                        out.edges.append(Edge(path, "IMPORTS", target))
+                        out.edges.append(Edge(path, "IMPORTS",
+                                              f"{target} as {a.asname}" if a.asname else target))
             else:
                 walk(child, prefix, owner, fields)
 
     walk(tree)
+    # Calls at module level — `app = FastAPI()`, `router.include_router(...)`, a
+    # `main()` guard — belong to the module. They belonged to nothing.
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for call in ast.walk(stmt):
+            if isinstance(call, ast.Call):
+                target = _call_name(call.func)
+                if target:
+                    out.edges.append(Edge(path, "CALLS", target))
     return out
 
 

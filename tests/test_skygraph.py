@@ -876,6 +876,53 @@ class ACallOnAnInterfaceReachesItsImplementations(_Indexed):
         self.assertEqual(got, {"A.ts::b": None, "A.ts::a": "R.ts::Repo.save"})
 
 
+class ACallBelongsToTheModuleWhenNothingEncloses(_Indexed):
+    """`describe(() => { it(() => { useX() }) })` at the top of a test file, and
+    `app.include_router(r)` at the top of a module, were calls from nothing."""
+
+    def test_a_top_level_typescript_callback_calls_from_the_file(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("h.ts", "export function useX() { return 1; }\n")
+        self.write("h.spec.ts", "import { useX } from './h';\n"
+                                "describe('x', () => {\n  it('y', () => {\n    useX();\n  });\n});\n")
+        self.build()
+        self.assertIn(("h.spec.ts", "h.ts::useX"), self.rel("CALLS"))
+
+    def test_a_python_module_level_call_calls_from_the_module(self):
+        self.write("util.py", "def helper():\n    pass\n")
+        self.write("app.py", "from util import helper\n\nhelper()\n\nif __name__ == '__main__':\n    helper()\n")
+        self.build()
+        self.assertIn(("app.py", "util.py::helper"), self.rel("CALLS"))
+
+
+class AnImportAliasIsFollowed(_Indexed):
+    def test_python_import_as(self):
+        self.write("util.py", "def helper():\n    pass\n\nclass Thing:\n    def go(self):\n        pass\n")
+        self.write("app.py", "import util as u\nfrom util import Thing as T\n\n"
+                             "def run():\n    u.helper()\n    t = T()\n    return t.go()\n")
+        self.build()
+        calls = self.rel("CALLS")
+        self.assertIn(("app.py::run", "util.py::helper"), calls)
+        self.assertIn(("app.py::run", "util.py::Thing.go"), calls)
+
+    def test_a_go_package_alias_reaches_the_package(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        os.makedirs(os.path.join(self.tmp, "svc"), exist_ok=True)
+        os.makedirs(os.path.join(self.tmp, "cmd"), exist_ok=True)
+        self.write("svc/service.go", "package svc\n\ntype Service struct{}\n\n"
+                                     "func NewService() *Service { return &Service{} }\n\n"
+                                     "func (s *Service) Handle() int { return 1 }\n\nfunc Plain() int { return 2 }\n")
+        self.write("cmd/main.go", "package main\n\nimport s \"example.com/proj/svc\"\n\n"
+                                  "func main() {\n\tx := s.NewService()\n\tx.Handle()\n\ts.Plain()\n}\n")
+        self.build()
+        calls = self.rel("CALLS")
+        self.assertIn(("cmd/main.go::main", "svc/service.go::Service.Handle"), calls)
+        self.assertIn(("cmd/main.go::main", "svc/service.go::Plain"), calls)
+        self.assertIn(("cmd/main.go::main", "svc/service.go::NewService"), calls)
+
+
 class AJavaClassSeesItsPackage(_Indexed):
     """Two honest gaps the benchmark documented, now closed."""
 

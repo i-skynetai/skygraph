@@ -28,6 +28,11 @@
   interface; `expand_symbol` shows `overrides` and `implemented_by`; `blast_radius`
   follows dispatch. On the Java monorepo, 28 implementation methods that had no
   caller now have theirs, 6 of 6 sampled confirmed by the declarations.
+- A call with no enclosing callable — a `describe(() => …)` at the top of a test file,
+  `app.include_router(...)` at the top of a module — belongs to the module, not to
+  nothing. A Go import binds its package name, and `svc.NewService()` reaches the
+  package's function and, through its return type, the struct's methods. Python
+  `import x as y` and `from x import A as B` are followed.
 - Go, Rust, C#, Kotlin, Swift, PHP and Ruby each have a three-file fixture and the same
   golden questions as Python and TypeScript, run in CI. Go methods are `Struct.Method`;
   Ruby `require_relative` is an import; PHP namespaces and PSR-4 root folders resolve;

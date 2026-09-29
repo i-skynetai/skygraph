@@ -153,7 +153,7 @@ def _resolve_import(raw: str, importer: str, language: str, files: dict,
     """
     targets = IMPORT_TARGETS.get(language)
     # `./x::Foo` names the module and the name it binds; only the module is a path.
-    raw = (raw or "").strip().partition("::")[0].strip()
+    raw = (raw or "").strip().partition("::")[0].partition(" as ")[0].strip()
     if not targets or not raw:
         return "", "external"
     here = posixpath.dirname(importer)
@@ -552,6 +552,10 @@ class Store:
                 "SELECT path, raw_dst, dst, resolution FROM edges WHERE repo=? AND "
                 "branch=? AND rel='IMPORTS'", (repo, branch)):
             spec, _sep, local = str(row["raw_dst"] or "").partition("::")
+            if not local and " as " in spec:
+                # Python: `import pkg.util as u`, `from pkg import Foo as F`.
+                spec, _as, local = spec.partition(" as ")
+                original_of.setdefault(row["path"], {})[local] = spec.rsplit(".", 1)[-1]
             # `Foo as F`: the file is looked up by `Foo`, the code says `F`.
             original, _as, alias_name = local.partition(" as ")
             local = alias_name or original
@@ -604,6 +608,34 @@ class Store:
                     found = through_barrels(target, wanted)
                     if found:
                         file_aliases[alias] = (found, outcome)
+
+        #: Go: a package is a directory, an import binds its name, and `svc.New()` is
+        #: a function in any file of that directory. Neither a file nor a class, so
+        #: it gets its own map: file → alias → the files of that package.
+        go_packages: dict[str, dict[str, list[str]]] = {}
+        go_dirs: dict[str, list[str]] = {}
+        for file, lang in language.items():
+            if lang == "go":
+                go_dirs.setdefault(file.rsplit("/", 1)[0] if "/" in file else "", []).append(file)
+        for row in self.db.execute(
+                "SELECT path, raw_dst FROM edges WHERE repo=? AND branch=? AND rel='IMPORTS'",
+                (repo, branch)):
+            if language.get(row["path"]) != "go" or "::" not in row["raw_dst"]:
+                continue
+            spec, _sep, alias = row["raw_dst"].partition("::")
+            parts = [x for x in spec.split("/") if x]
+            for n in range(len(parts), 0, -1):
+                tail = "/".join(parts[-n:])
+                hits = [d for d in go_dirs if d == tail or d.endswith("/" + tail)]
+                if len(hits) == 1:
+                    go_packages.setdefault(row["path"], {})[alias] = go_dirs[hits[0]]
+                    break
+
+        def in_package(files: list[str], bare: str) -> str:
+            for file in files:
+                if bare in plain_file.get(file, {}):
+                    return plain_file[file][bare]
+            return ""
 
         methods = {name for names in by_owner.values() for name in names}
         #: Classes grouped by the file that declares them. Both lookups below used to
@@ -669,6 +701,15 @@ class Store:
                 owner = src.rsplit(".", 1)[0] if "." in src.rsplit("::", 1)[-1] else ""
                 if head.startswith("self."):
                     fn = by_owner.get(owner, {}).get(head[len("self."):], "") if owner in class_names else ""
+                elif "." in head and head.split(".")[0] in go_packages.get(path, {}):
+                    # `svc.NewService()`: a factory in an imported Go package.
+                    package = go_packages[path][head.split(".")[0]]
+                    fn = in_package(package, head.split(".")[-1])
+                    rtype = returns_of.get(fn, "")
+                    cls = in_package(package, rtype) if rtype else ""
+                    if cls and member in by_owner.get(cls, {}):
+                        return by_owner[cls][member], "package"
+                    return "", unplaced(member)
                 elif "." in head:
                     cls = place_class(path, head.split(".")[0], mine)
                     fn = by_owner.get(cls or "", {}).get(head.split(".")[-1], "")
@@ -705,6 +746,9 @@ class Store:
                 # must not be matched on the method name alone.
                 root = raw.split(".")[0]
                 known = named.get(path, {})
+                if raw.count(".") == 1 and root in go_packages.get(path, {}):
+                    found = in_package(go_packages[path][root], bare)
+                    return (found, "package") if found else ("", "external")
                 if raw.count(".") == 1 and root in classes_in.get(path, {}):
                     members = by_owner.get(classes_in[path][root], {})
                     if bare in members:

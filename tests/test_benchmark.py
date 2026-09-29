@@ -293,8 +293,6 @@ class GoldenQuestionsSevenMoreLanguages(unittest.TestCase):
 
     def test_the_entry_point_reaches_the_service_across_files(self):
         for language, (_f, service, *_rest) in OTHER_LANGUAGES.items():
-            if language == "go":
-                continue    # `svc.NewService()` through a package alias is not followed yet
             with self.subTest(language=language):
                 out = self.ask("expand_symbol", language, 1_200, qualified_name=service)
                 self.assertIn(ENTRY[language], {c["other"] for c in out["called_by"]})

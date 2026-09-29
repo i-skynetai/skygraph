@@ -169,6 +169,8 @@ def _constructed(value, language: str = "") -> str:
             return text                                  # kotlin, swift `Foo()`
         if text.isidentifier():                          # a factory: follow its return type
             return f"{text}()"
+        if re.fullmatch(r"[A-Za-z_]\w*\.[A-Za-z_]\w*", text):
+            return f"{text}()"                           # `svc.NewService()`: a package's factory
         if text.startswith(("this.", "self.", "$this->", "@")) and text.count(".") + text.count("->") == 1:
             return "self." + text.replace("->", ".").lstrip("$@").split(".")[-1] + "()"
         return ""
@@ -612,16 +614,24 @@ def parse(path: str, source: str, language: str) -> FileResult:
             if arg is not None:
                 out.edges.append(Edge(path, "IMPORTS", "./" + _text(arg) if _callee(node) == "require_relative" else _text(arg), "native"))
 
-        elif what == "call" and enclosing:
+        elif what == "call":
+            # A call with no enclosing callable — `describe(() => { it(() => { f() }) })`
+            # at the top of a test file, a module-level `app.use(...)` — belongs to the
+            # module. It used to belong to nothing, and every such caller was missing.
             target = _callee(node)
             if target:
-                out.edges.append(Edge(enclosing, "CALLS",
+                out.edges.append(Edge(enclosing or path, "CALLS",
                                       _retype(target, locals_, fields), "native"))
 
         elif what == "import":
             module = _module(node)
             if module:
                 names = _import_names(node) if node.type == "import_statement" else []
+                if language == "go" and node.type == "import_spec":
+                    # A Go import binds a package name: the alias, or the path's last
+                    # segment. `svc.NewService()` needs to know `svc` is that package.
+                    alias = node.child_by_field_name("name")
+                    names = [_text(alias) if alias is not None else module.rsplit("/", 1)[-1]]
                 for name in names or [""]:
                     out.edges.append(Edge(path, "IMPORTS",
                                           f"{module}::{name}" if name else module, "native"))
