@@ -375,7 +375,16 @@ class Store:
                 cur.execute("INSERT OR REPLACE INTO symbols VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                             (s.name, s.kind, s.path, s.line, s.end_line, s.tier,
                              s.ontology, s.summary, s.returns, repo, branch))
+            # One edge per (caller, callee) in a file. `expect(...)` fifty times in one
+            # callback was fifty rows; 62 % of a monorepo's call edges were repeats,
+            # and `expand_symbol` listed `cur.execute` three times. Nothing reads the
+            # count.
+            written: set[tuple[str, str, str]] = set()
             for e in result.edges:
+                key = (e.src, e.rel, e.dst)
+                if key in written:
+                    continue
+                written.add(key)
                 cur.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?,?,?,?)",
                             (e.src, e.rel, e.dst, e.tier, e.ontology, result.path,
                              e.dst, "unresolved", repo, branch))
@@ -501,12 +510,16 @@ class Store:
         returns_of: dict[str, str] = {}
         #: Every class by bare name, for a typed receiver whose class is declared once.
         class_by_bare: dict[str, list[str]] = {}
+        #: Members added to a type by an extension block, by the type's bare name.
+        extensions: dict[str, list[str]] = {}
         for row in self.db.execute(
-                "SELECT name, path, kind, returns FROM symbols WHERE repo=? AND branch=? "
+                "SELECT name, path, kind, returns, summary FROM symbols WHERE repo=? AND branch=? "
                 "AND kind IN ('Function','Method','Class')", (repo, branch)):
             name, path = row["name"], row["path"]
             if row["returns"]:
                 returns_of[name] = row["returns"]
+            if row["kind"] == "Class" and row["summary"] == "extension":
+                extensions.setdefault(name.rsplit("::", 1)[-1].rsplit(".", 1)[-1], []).append(name)
             tail = name.rsplit("::", 1)[-1]
             bare = tail.rsplit(".", 1)[-1]
             by_tail.setdefault(bare, []).append(name)
@@ -528,7 +541,8 @@ class Store:
                     dir_classes.setdefault(_package_of(path), {}).setdefault(bare, name)
             if row["kind"] == "Class":
                 class_names.add(name)
-                class_by_bare.setdefault(bare, []).append(name)
+                if row["summary"] != "extension":       # an extension declares no new type
+                    class_by_bare.setdefault(bare, []).append(name)
 
         # module stem -> the file that defines it, for following an import
         #: Which language each file is, so a name is never matched across one. A Java
@@ -630,6 +644,16 @@ class Store:
                 if len(hits) == 1:
                     go_packages.setdefault(row["path"], {})[alias] = go_dirs[hits[0]]
                     break
+
+        def member_of(cls: str, bare: str) -> str:
+            """A method of `cls` — declared on it, on the primary declaration of the
+            same type when `cls` is itself an extension block, or on any extension."""
+            type_name = cls.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
+            for owner in [cls, *class_by_bare.get(type_name, []), *extensions.get(type_name, [])]:
+                found = by_owner.get(owner, {}).get(bare, "")
+                if found:
+                    return found
+            return ""
 
         def in_package(files: list[str], bare: str) -> str:
             for file in files:
@@ -750,10 +774,8 @@ class Store:
                     found = in_package(go_packages[path][root], bare)
                     return (found, "package") if found else ("", "external")
                 if raw.count(".") == 1 and root in classes_in.get(path, {}):
-                    members = by_owner.get(classes_in[path][root], {})
-                    if bare in members:
-                        return members[bare], "same-file-class"
-                    return "", unplaced(bare)
+                    found = member_of(classes_in[path][root], bare)
+                    return (found, "same-file-class") if found else ("", unplaced(bare))
                 if root in known:
                     target, outcome = known[root]
                     if target is None:
@@ -767,10 +789,8 @@ class Store:
                     # live in the same file.
                     owner = classes_in.get(target, {}).get(declared_as(path, root))
                     if owner:
-                        members = by_owner.get(owner, {})
-                        if bare in members:
-                            return members[bare], "receiver"
-                        return "", unplaced(bare)
+                        found = member_of(owner, bare)
+                        return (found, "receiver") if found else ("", unplaced(bare))
                     if bare in plain_file.get(target, {}):
                         return plain_file[target][bare], "receiver"
                     # The alias names a module with no such top-level function. Either
@@ -784,19 +804,15 @@ class Store:
                 owners = [classes_in[other][root] for other in imports.get(path, ())
                           if root in classes_in.get(other, {})]
                 if len(owners) == 1:
-                    members = by_owner.get(owners[0], {})
-                    if bare in members:
-                        return members[bare], "imported-class"
-                    return "", unplaced(bare)
+                    found = member_of(owners[0], bare)
+                    return (found, "imported-class") if found else ("", unplaced(bare))
                 # A Java package needs no import: `TenantContext.getTenantId()` from
                 # the class next door is a receiver this file can see.
                 if mine in PACKAGE_SCOPED:
                     owner = dir_classes.get(_package_of(path), {}).get(root)
                     if owner:
-                        members = by_owner.get(owner, {})
-                        if bare in members:
-                            return members[bare], "same-package"
-                        return "", unplaced(bare)
+                        found = member_of(owner, bare)
+                        return (found, "same-package") if found else ("", unplaced(bare))
                 # A receiver written as a type name — the front end rewrote `svc.find`
                 # to `FooService.find` from the field's declaration — and that class is
                 # declared once in this language.
@@ -804,10 +820,8 @@ class Store:
                     candidates = [c for c in class_by_bare.get(root, [])
                                   if language.get(c.split("::", 1)[0]) == mine]
                     if len(candidates) == 1:
-                        members = by_owner.get(candidates[0], {})
-                        if bare in members:
-                            return members[bare], "unique-class"
-                        return "", unplaced(bare)
+                        found = member_of(candidates[0], bare)
+                        return (found, "unique-class") if found else ("", unplaced(bare))
                 # An unknown receiver: a local, a parameter, a return value. We do not
                 # know its type, so we do not know whose method this is. Resolving on
                 # the name being unique is the guess this refuses everywhere else —

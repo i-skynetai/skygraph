@@ -353,7 +353,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **257 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **260 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 
@@ -361,7 +361,10 @@ Every claimed language has a three-file fixture — a repository class, a servic
 it in a typed field, an entry point — and the same golden questions in CI: what is in
 this file, what does the service call, who calls the repository, does the entry point
 reach the service. Python, TypeScript and Java are additionally measured on real
-repositories; the other seven are proven on those fixtures and nothing larger yet.
+repositories; the other seven were also indexed from one real open-source project each
+(gorilla/mux, tokio-rs/bytes, serilog, square/moshi, Alamofire, slimphp/Slim, sinatra):
+every file parsed, no ambiguous edge invented, and a sample of typed-receiver
+resolutions in each confirmed against the source.
 
 `index_health` reports per language whether it produces call edges at all, so a thin
 graph is visible rather than merely quiet.

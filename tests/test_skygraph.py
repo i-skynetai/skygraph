@@ -923,6 +923,38 @@ class AnImportAliasIsFollowed(_Indexed):
         self.assertIn(("cmd/main.go::main", "svc/service.go::NewService"), calls)
 
 
+class AnExtensionAddsMembersToAType(_Indexed):
+    def test_a_swift_extension_is_not_a_second_class(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("Session.swift", "class Session {\n    func start() {}\n}\n")
+        self.write("Session+Retry.swift", "extension Session {\n    func retry() {}\n}\n")
+        self.write("App.swift", "func run(s: Session) {\n    s.start()\n    s.retry()\n}\n")
+        self.build()
+        calls = {d for s_, d in self.rel("CALLS") if s_ == "App.swift::run"}
+        self.assertEqual(calls, {"Session.swift::Session.start", "Session+Retry.swift::Session.retry"})
+        self.assertEqual(self.out["calls"]["ambiguous"], 0)
+
+    def test_a_rust_impl_block_is_not_a_second_struct(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("a.rs", "pub struct Buf;\nimpl Buf {\n    pub fn len(&self) -> usize { 0 }\n}\n")
+        self.write("b.rs", "use crate::a::Buf;\nimpl Buf {\n    pub fn clear(&self) {}\n}\n"
+                           "pub fn go(b: Buf) { b.len(); b.clear(); }\n")
+        self.build()
+        calls = {d for s_, d in self.rel("CALLS") if s_ == "b.rs::go"}
+        self.assertEqual(calls, {"a.rs::Buf.len", "b.rs::Buf.clear"})
+
+
+class ACallIsRecordedOncePerCaller(_Indexed):
+    def test_fifty_calls_to_the_same_thing_are_one_edge(self):
+        self.write("util.py", "def helper():\n    pass\n")
+        self.write("a.py", "from util import helper\n\ndef go():\n" + "    helper()\n" * 50)
+        self.build()
+        rows = [d for s_, d in self.rel("CALLS") if s_ == "a.py::go"]
+        self.assertEqual(rows, ["util.py::helper"])
+
+
 class AJavaClassSeesItsPackage(_Indexed):
     """Two honest gaps the benchmark documented, now closed."""
 

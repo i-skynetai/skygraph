@@ -33,6 +33,13 @@
   nothing. A Go import binds its package name, and `svc.NewService()` reaches the
   package's function and, through its return type, the struct's methods. Python
   `import x as y` and `from x import A as B` are followed.
+- One call edge per (caller, callee, file): `expect(...)` fifty times in one callback
+  was fifty rows. The monorepo's call edges fell from 494k to 190k, its index from
+  498 MB to 286 MB, and `expand_symbol` no longer lists the same callee three times.
+- Swift `extension T` and Rust `impl T` blocks add members to a type declared elsewhere
+  instead of declaring a second `T`; a library's `Session`, "declared five times", is
+  one type again. Templates (`.erb`, `.haml`, `.vue`, …) and IDE project files are not
+  source and no longer count as degraded.
 - Go, Rust, C#, Kotlin, Swift, PHP and Ruby each have a three-file fixture and the same
   golden questions as Python and TypeScript, run in CI. Go methods are `Struct.Method`;
   Ruby `require_relative` is an import; PHP namespaces and PSR-4 root folders resolve;

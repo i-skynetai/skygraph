@@ -516,14 +516,24 @@ def parse(path: str, source: str, language: str) -> FileResult:
             role[node.id] = capture
     seen: set[str] = set()
 
-    def declare(name: str, kind: str, node, returns: str = "") -> str:
+    def declare(name: str, kind: str, node, returns: str = "", summary: str = "") -> str:
         qualified = f"{path}::{name}"
         if qualified in seen:
             return qualified
         seen.add(qualified)
         out.symbols.append(Symbol(qualified, kind, path, node.start_point[0] + 1,
-                                  node.end_point[0] + 1, "native", returns=returns))
+                                  node.end_point[0] + 1, "native", returns=returns,
+                                  summary=summary))
         return qualified
+
+    def is_extension(node) -> bool:
+        """Swift `extension T { }` and Rust `impl T { }` add members to a type declared
+        elsewhere. Declared as a second `T`, they made every call on `T` ambiguous:
+        one library's `Session` was "declared five times"."""
+        if node.type == "impl_item":
+            return node.child_by_field_name("trait") is None
+        kind = node.child_by_field_name("declaration_kind")
+        return kind is not None and _text(kind) == "extension"
 
     def is_function_value(node) -> bool:
         value = node.child_by_field_name("value")
@@ -570,7 +580,8 @@ def parse(path: str, source: str, language: str) -> FileResult:
             name = (_type_name(node.child_by_field_name("type")) if node.type == "impl_item"
                     and node.child_by_field_name("type") is not None else _name_of(node))
             if name:
-                qualified = declare(name, "Class", node)
+                qualified = declare(name, "Class", node,
+                                    summary="extension" if is_extension(node) else "")
                 out.edges.append(Edge(owner or path, "CONTAINS", qualified, "native"))
                 for rel, base in _supertypes(node):
                     out.edges.append(Edge(qualified, rel, base, "native"))

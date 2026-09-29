@@ -75,6 +75,12 @@ NOT_SOURCE = {
     ".html", ".htm", ".xhtml",                 # usually generated; never declarations
     ".mmd", ".mermaid", ".dot", ".puml",       # diagrams: text, not code
     ".scm",                                    # tree-sitter queries: read by the parser, not indexed
+    # templates: markup with holes, not code — a Ruby site had 100 of them "degraded"
+    ".erb", ".haml", ".slim", ".erubis", ".hamlit", ".str", ".liquid", ".mustache",
+    ".hbs", ".ejs", ".jinja", ".jinja2", ".j2", ".twig", ".njk", ".vue",
+    # IDE and build-system project files
+    ".xcscheme", ".xctestplan", ".storyboard", ".xib", ".pbxproj", ".xcworkspacedata",
+    ".podspec", ".sln", ".csproj", ".iml", ".gradle.kts.lock",
     ".css", ".scss", ".less", ".plist", ".properties", ".ini", ".cfg", ".env",
 }
 
