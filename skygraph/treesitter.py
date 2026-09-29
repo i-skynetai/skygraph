@@ -176,6 +176,10 @@ def _constructed(value, language: str = "") -> str:
 
 
 INSTANCE_PREFIXES = ("this.", "self.", "$this->", "@")
+#: Expressions whose type a value states by itself, across the grammars.
+VALUE_KINDS = ("call_expression", "new_expression", "object_creation_expression",
+               "invocation_expression", "function_call_expression", "method_invocation",
+               "call", "composite_literal")
 
 
 def _binding(node, language: str = "") -> tuple[str, str, bool]:
@@ -241,11 +245,15 @@ def _binding(node, language: str = "") -> tuple[str, str, bool]:
                 (c for c in node.children if c.type == "variable_declarator"), None)
             if declarator is not None:
                 value = declarator.child_by_field_name("value")
+                if value is None:
+                    # C#: the initializer is a plain child of the declarator, or sits
+                    # inside an `equals_value_clause`, depending on the grammar version.
+                    clause = next((c for c in declarator.children
+                                   if c.type == "equals_value_clause"), None)
+                    holder = clause if clause is not None else declarator
+                    value = next((c for c in holder.children if c.type in VALUE_KINDS), None)
         if value is None:
-            value = next((c for c in node.children if c.type in
-                          ("call_expression", "new_expression", "object_creation_expression",
-                           "invocation_expression", "function_call_expression",
-                           "method_invocation", "call", "composite_literal")), None)
+            value = next((c for c in node.children if c.type in VALUE_KINDS), None)
         if value is not None and value.type == "expression_list":
             value = value.children[0] if value.children else None
         kind = _constructed(value, language)
@@ -539,20 +547,31 @@ def parse(path: str, source: str, language: str) -> FileResult:
             name = _name_of(node)
             if name:
                 inside = owner and owner != path
-                full = f"{owner.split('::', 1)[-1]}.{name}" if inside else name
-                qualified = declare(full, "Method" if inside else "Function", node,
-                                    returns=_return_type(node))
-                out.edges.append(Edge(owner or path, "CONTAINS", qualified, "native"))
+                receiver, rtype = _receiver_of(node)
+                if rtype and not inside:
+                    # Go: `func (s *Service) Handle()` is `Service.Handle`, a method of
+                    # a struct declared elsewhere in the file — or in another one.
+                    full, kind, holder = f"{rtype}.{name}", "Method", f"{path}::{rtype}"
+                else:
+                    full = f"{owner.split('::', 1)[-1]}.{name}" if inside else name
+                    kind, holder = ("Method" if inside else "Function"), (owner or path)
+                qualified = declare(full, kind, node, returns=_return_type(node))
+                out.edges.append(Edge(holder, "CONTAINS", qualified, "native"))
                 own = bindings_under(node, container=False)
                 seen_fields = fields
-                receiver, rtype = _receiver_of(node)
                 if receiver and rtype:
-                    # Go: `func (a *A) M()` — `a` is this method's `self`.
+                    # `s` is this method's `self`.
                     own[receiver] = "self"
                     seen_fields = struct_fields.get(rtype, fields)
                 for child in node.children:
                     walk(child, owner, qualified, seen_fields, own)
                 return
+
+        elif what == "call" and language == "ruby" and _callee(node) in ("require", "require_relative"):
+            # Ruby imports are calls. Record the file, not a call to `require`.
+            arg = _first(node, {"string_content"})
+            if arg is not None:
+                out.edges.append(Edge(path, "IMPORTS", "./" + _text(arg) if _callee(node) == "require_relative" else _text(arg), "native"))
 
         elif what == "call" and enclosing:
             target = _callee(node)

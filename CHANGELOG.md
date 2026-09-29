@@ -22,6 +22,10 @@
 - `skygraph forget --repo X` drops a repository from the index.
 - `find_symbols` answers an exact name with that row alone unless `limit` is passed:
   a unique-name lookup fell from 2.8 KB to under 0.5 KB.
+- Go, Rust, C#, Kotlin, Swift, PHP and Ruby each have a three-file fixture and the same
+  golden questions as Python and TypeScript, run in CI. Go methods are `Struct.Method`;
+  Ruby `require_relative` is an import; PHP namespaces and PSR-4 root folders resolve;
+  a Go package is a scope like a Java package.
 
 ## 0.2.0 — 2026-09-27
 

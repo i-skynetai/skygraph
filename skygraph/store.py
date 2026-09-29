@@ -97,7 +97,7 @@ IMPORT_TARGETS: dict[str, tuple[str, ...]] = {
 
 #: Languages where a class in the same package is in scope without an import — a
 #: Java package, a C# namespace folder, a Kotlin package, a Swift module.
-PACKAGE_SCOPED = {"java", "kotlin", "csharp", "swift", "scala"}
+PACKAGE_SCOPED = {"java", "kotlin", "csharp", "swift", "scala", "go"}
 #: Source roots under which the directory *is* the package. `src/main/java/com/x`
 #: and `src/test/java/com/x` are one package in two directories, and a test calling
 #: `Foo.bar()` on the class next door was untyped until the two were read as one.
@@ -193,19 +193,30 @@ def _resolve_import(raw: str, importer: str, language: str, files: dict,
                 return found, "resolved"
         return "", "external"
 
-    parts = [x for x in raw.replace("::", "/").replace(".", "/").split("/")
+    parts = [x for x in raw.replace("::", "/").replace("\\", "/").replace(".", "/").split("/")
              if x and x not in ("crate", "self", "super")]
-    for n in range(len(parts), 0, -1):
-        base = "/".join(parts[:n])
+
+    def attempt(base: str) -> tuple[str, str] | None:
         hits: list[str] = []
         for ext in targets:
             hits += suffixes.get(posixpath.normpath(base + ext), [])
         if not hits:
-            continue
+            return None
         hits = sorted(set(hits), key=lambda h: (-_shared_dirs(h, importer), h))
         if len(hits) == 1 or _shared_dirs(hits[0], importer) > _shared_dirs(hits[1], importer):
             return hits[0], "resolved"
         return "", "ambiguous"
+
+    for n in range(len(parts), 0, -1):                   # longest form first
+        found = attempt("/".join(parts[:n]))
+        if found:
+            return found
+    # A root namespace that maps to a folder — PSR-4's `App\` → `src/`, or a Java
+    # package laid out without its leading directories: drop leading segments.
+    for k in range(1, len(parts)):
+        found = attempt("/".join(parts[k:]))
+        if found:
+            return found
     return "", "external"
 
 
