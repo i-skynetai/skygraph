@@ -2671,6 +2671,15 @@ class TheMcpProtocolIsHonoured(unittest.TestCase):
         self.assertIn("query", str(caught.exception))
         self.assertIn("find_symbols", str(caught.exception))
 
+    def test_a_missing_argument_is_said_once(self):
+        """Found on a live server: `context_for needs a '"context_for needs a
+        'qualified_name' argument"' argument` — the tool's own sentence wrapped again."""
+        with self.assertRaises(mcp.ProtocolError) as caught:
+            self._ask({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": "context_for", "arguments": {}}})
+        said = str(caught.exception)
+        self.assertEqual(said, "context_for needs a 'qualified_name' argument")
+
     def test_ping_is_answered(self):
         self.assertEqual(self._ask({"jsonrpc": "2.0", "id": 1, "method": "ping"}), {})
 

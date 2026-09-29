@@ -7,6 +7,7 @@
   built by a factory follows the factory's declared return type. Java's resolved share
   of in-repository calls on a real monorepo: 17 % → 47 %; Python 53 % → 59 %.
   Symbols carry `returns`; the index schema is version 7 and rebuilds.
+- A missing tool argument is named once, not wrapped in itself.
 - An index written by a newer skygraph is refused, not rebuilt. A server still running
   older code keeps the handshake and the tool list, answers every tool call with the two
   schema numbers and "restart", and leaves the file alone. Found when a refreshed index

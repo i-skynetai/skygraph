@@ -154,8 +154,13 @@ def handle(store: Store, req: dict, default_repo: str | None = None) -> dict | N
             # A missing argument and an unknown tool are both the caller's mistake,
             # and both are recoverable — say which, without a Python class name and
             # without making the caller guess which argument was meant.
-            detail = str(exc).strip("'")
-            if not detail.startswith("no such tool"):
+            # str(KeyError) is the repr of its argument — quoted, and double-quoted
+            # when the message itself holds quotes — so the argument is read directly.
+            detail = str(exc.args[0]) if exc.args else str(exc)
+            # A tool phrases its own complaint ("context_for needs a 'qualified_name'
+            # argument"); a bare key name is a dict lookup that missed, and is phrased
+            # here. Phrasing a phrased one again read: needs a '"needs a ..."' argument.
+            if " " not in detail:
                 detail = f"{name} needs a {detail!r} argument"
             raise ProtocolError(INVALID_PARAMS, detail) from exc
         return {"content": [{"type": "text", "text": json.dumps(payload, indent=2)}]}

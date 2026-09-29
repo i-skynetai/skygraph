@@ -10,7 +10,7 @@ python3 -m unittest discover -s tests -t .                 # the default install
 Run it **both ways**. The parser tier only executes when tree-sitter is installed, and
 a skipped test is not evidence — CI runs the suite twice for the same reason.
 
-262 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
+263 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
 command CI runs, so a green run here is the run that matters.
 
 ## The benchmark
