@@ -367,6 +367,19 @@ class Store:
                             (e.src, e.rel, e.dst, e.tier, e.ontology, result.path,
                              e.dst, "unresolved", repo, branch))
 
+    def forget(self, repo: str, branch: str = "main") -> int:
+        """Drop one repository from the index entirely. Returns the files it had.
+
+        `prune` forgets files that vanished from a tree that is still indexed; this
+        forgets the tree. Until it existed, removing a scratch copy meant SQL by hand.
+        """
+        files = self.db.execute("SELECT COUNT(*) FROM files WHERE repo=? AND branch=?",
+                                (repo, branch)).fetchone()[0]
+        with self.db:
+            for table in ALL_TABLES:
+                self.db.execute(f"DELETE FROM {table} WHERE repo=? AND branch=?", (repo, branch))
+        return files
+
     def prune(self, keep: set[str], repo: str, branch: str) -> list[str]:
         """Forget indexed files that no longer exist. Returns their paths.
 

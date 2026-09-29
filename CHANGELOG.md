@@ -9,7 +9,17 @@
   Symbols carry `returns`; the index schema is version 7 and rebuilds.
 - Barrels are followed: `export … from` in TypeScript and the imports of a Python
   `__init__.py` are `RE_EXPORTS` edges, and a name imported through one is bound to the
-  file that declares it.
+  file that declares it. A call on a destructured or untyped local is `untyped`, not
+  `ambiguous`.
+- Java frameworks: JAX-RS (`@Path`, `@GET`) and Spring (`@GetMapping`, `@RequestMapping`)
+  endpoints joined to their handlers, with constant-built routes kept as placeholders;
+  JPA `@Entity` classes with tables, fields and references. Endpoint → handler → entity
+  traces now exist for Java.
+- Manifests are knowledge: `package.json`, `pom.xml`, `build.gradle`, `requirements*.txt`,
+  `pyproject.toml`, `go.mod`, `Cargo.toml`, `Gemfile`, `composer.json` yield `Dependency`
+  symbols and `DEPENDS_ON` edges in the deploy ontology instead of "unknown" noise.
+- Modules and Python endpoints carry an end line, so `read_source` on either is exact.
+- `skygraph forget --repo X` drops a repository from the index.
 
 ## 0.2.0 — 2026-09-27
 

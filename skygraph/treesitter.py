@@ -460,7 +460,7 @@ def parse(path: str, source: str, language: str) -> FileResult:
     # until a `.tsx` file was parsed as `.ts`; the rest were in components.
     grammar = "tsx" if path.endswith(".tsx") and "tsx" in GRAMMAR else language
     out = FileResult(path=path, language=language, tier="native")
-    out.symbols.append(Symbol(path, "Module", path, 1, 0, "native"))
+    out.symbols.append(Symbol(path, "Module", path, 1, source.count("\n") + 1, "native"))
 
     tree = _parser(grammar).parse(source.encode("utf-8", "replace"))
     # Which capture each node is in, by node id. One query run per file; the walk

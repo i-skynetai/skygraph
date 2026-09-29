@@ -135,6 +135,14 @@ args = []
 `skygraph-mcp` is a stdio MCP server. It negotiates the protocol version, answers
 `ping`, and never replies to a notification. Any compliant host will do.
 
+## Removing a repository
+
+```bash
+skygraph forget --repo myproject
+```
+
+drops it from the index; the others are untouched.
+
 ## Re-index after the tree changes
 
 The index records a content hash per file, and `read_source` compares it. A file that

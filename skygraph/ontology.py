@@ -70,9 +70,12 @@ API_ONTOLOGY = Ontology(
 DEPLOY_ONTOLOGY = Ontology(
     name="deploy_ontology",
     purpose="how it runs: images, services, configuration and the pipelines that ship it",
-    kinds=("Image", "Deployable", "EnvVar", "Pipeline", "Stage"),
-    relations=("BUILDS", "RUNS", "CONFIGURES", "DEPLOYS", "STAGE_OF"),
-    absent_means="no Dockerfile, compose file, manifest or pipeline definition was found",
+    # Dependency: what a manifest declares the project needs — `package.json`,
+    # `pom.xml`, `requirements.txt`. Part of how it runs; not part of the code.
+    kinds=("Image", "Deployable", "EnvVar", "Pipeline", "Stage", "Dependency"),
+    relations=("BUILDS", "RUNS", "CONFIGURES", "DEPLOYS", "STAGE_OF", "DEPENDS_ON"),
+    absent_means="no Dockerfile, compose file, manifest, pipeline definition or "
+                 "dependency manifest was found",
 )
 
 LINK = Ontology(

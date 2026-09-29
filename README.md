@@ -63,9 +63,9 @@ raises rather than writing a row nobody agreed to.
 | | | Read from |
 |---|---|---|
 | `code_ontology` | what is declared, what calls what, what imports what | Python AST; ten more languages parsed with `[parsers]`, pattern-matched without |
-| `data_ontology` | entities, fields, keys | SQLAlchemy, Django, SQLModel, SQL DDL, Prisma |
-| `api_ontology` | endpoints, operations, parameters | FastAPI, Flask, Express, Spring, OpenAPI in JSON or YAML |
-| `deploy_ontology` | images, deployables, config, pipelines | Dockerfile, Compose, Kubernetes, GitHub Actions, GitLab CI |
+| `data_ontology` | entities, fields, keys | SQLAlchemy, Django, SQLModel, JPA, SQL DDL, Prisma |
+| `api_ontology` | endpoints, operations, parameters | FastAPI, Flask, Express, Spring, JAX-RS, OpenAPI in JSON or YAML |
+| `deploy_ontology` | images, deployables, config, pipelines, dependencies | Dockerfile, Compose, Kubernetes, GitHub Actions, GitLab CI, `package.json`, `pom.xml`, `build.gradle`, `requirements`, `pyproject`, `go.mod`, `Cargo.toml` |
 | `link` | the joins between the layers | derived after indexing |
 
 **A file can feed several at once.** A module of SQLAlchemy models is `code_ontology`
@@ -352,7 +352,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **233 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+, standard library only. **244 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

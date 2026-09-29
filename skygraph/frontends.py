@@ -109,6 +109,8 @@ def unclaimed_source(path: str) -> bool:
 def language_of(path: str) -> str | None:
     if path.endswith(".py"):
         return "python"
+    if extractors.is_manifest(path):
+        return "manifest"                      # before `.json`: package.json is not data
     for lang, spec in QUERY_LANGUAGES.items():
         if path.endswith(spec["ext"]):
             return lang
@@ -140,7 +142,7 @@ def parse(path: str, source: str) -> FileResult:
             result = _heuristic(path, source, "python")
             result.degraded = (f"python AST failed ({exc.msg} line {exc.lineno}); "
                                "fell to heuristic")
-    elif lang == "dockerfile" or lang in DATA_LANGUAGES.values():
+    elif lang == "dockerfile" or lang == "manifest" or lang in DATA_LANGUAGES.values():
         # No code to find. An empty shell that the ontology pass fills, or does not.
         result = FileResult(path=path, language=lang, tier="native")
     elif treesitter.claims(lang):
@@ -189,7 +191,14 @@ def _enrich(result: FileResult, path: str, source: str, lang: str | None,
             symbols, edges = found
         elif lang == "yaml":
             symbols, edges = _deploy_yaml(path, source)
-    elif lang in ("javascript", "typescript", "java"):
+    elif lang == "manifest":
+        symbols, edges = extractors.deploy_from_manifest(path, source)
+    elif lang == "java":
+        symbols, edges = extractors.api_ontology_from_java(path, source)
+        found, joined = extractors.data_ontology_from_java(path, source)
+        symbols += found
+        edges += joined
+    elif lang in ("javascript", "typescript"):
         symbols, edges = extractors.api_ontology_from_pattern(path, source, lang)
 
     # An environment read is not a declaration, so it is not a symbol. It is recorded
@@ -241,7 +250,7 @@ def _end(node) -> int:
 def _native_python(path: str, source: str) -> FileResult:
     tree = ast.parse(source)
     out = FileResult(path=path, language="python", tier="native")
-    out.symbols.append(Symbol(path, "Module", path, 1, _end(tree), "native",
+    out.symbols.append(Symbol(path, "Module", path, 1, source.count("\n") + 1, "native",
                               summary=_doc(tree)))
 
     def qualified(node, prefix: str) -> str:
@@ -464,7 +473,7 @@ def _call_name(node) -> str | None:
 def _query(path: str, source: str, lang: str) -> FileResult:
     spec = QUERY_LANGUAGES[lang]
     out = FileResult(path=path, language=lang, tier="query")
-    out.symbols.append(Symbol(path, "Module", path, 1, 0, "query"))
+    out.symbols.append(Symbol(path, "Module", path, 1, source.count("\n") + 1, "query"))
     for i, line in enumerate(source.splitlines(), 1):
         for pattern, kind in ((spec["class"], "Class"), (spec["func"], "Function")):
             m = re.match(pattern, line)
@@ -485,7 +494,7 @@ _ANY_DECL = re.compile(r"^\s*(?:class|def|func|function|fn|type)\s+(\w+)")
 def _heuristic(path: str, source: str, lang: str) -> FileResult:
     """Last resort. Everything here is marked a guess, because it is one."""
     out = FileResult(path=path, language=lang, tier="heuristic")
-    out.symbols.append(Symbol(path, "Module", path, 1, 0, "heuristic"))
+    out.symbols.append(Symbol(path, "Module", path, 1, source.count("\n") + 1, "heuristic"))
     for i, line in enumerate(source.splitlines(), 1):
         m = _ANY_DECL.match(line)
         if m:

@@ -2195,6 +2195,162 @@ class TheServerDefaultsToTheProjectRepo(unittest.TestCase):
         self.assertEqual(len(got["results"]), 2)
 
 
+JAXRS = """package com.x;
+import javax.ws.rs.*;
+
+@Path("/incidents")
+public class IncidentResource {
+    @GET
+    @Path("/{id}")
+    public Incident get(@PathParam("id") String id) { return new Incident(); }
+
+    @POST
+    public Response create(Incident body) { return null; }
+}
+"""
+
+SPRING = """@RestController
+@RequestMapping("/api/v1")
+public class TaskController {
+    @GetMapping("/tasks/{id}")
+    public Task one(@PathVariable UUID id) { return null; }
+
+    @RequestMapping(method = RequestMethod.DELETE, value = "/tasks/{id}")
+    public void drop(UUID id) {}
+}
+"""
+
+JPA = """@Entity
+@Table(name = "incidents")
+public class Incident {
+    @Id
+    private UUID id;
+    @Column(name = "title")
+    private String title;
+    @ManyToOne
+    private Team owner;
+    @OneToMany(mappedBy = "incident")
+    private List<Comment> comments;
+    @Transient
+    private int cached;
+    public String getTitle() { return title; }
+}
+"""
+
+
+class TheJavaFrameworksAreRead(_Indexed):
+    """One real service had 38 files of `@GET`/`@POST` and 24 `@Entity` classes, and
+    the graph knew of none of them: the patterns knew Spring's spelling only, and
+    nothing read JPA at all."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("IncidentResource.java", JAXRS)
+        self.write("TaskController.java", SPRING)
+        self.write("Incident.java", JPA)
+        self.build()
+
+    def test_jaxrs_endpoints_join_the_class_path_and_the_method(self):
+        got = {s["summary"] for s in self.store.search("", "r", ontology="api_ontology", limit=50)
+               if s["kind"] == "Endpoint"}
+        self.assertIn("GET /incidents/{id}", got)
+        self.assertIn("POST /incidents", got)
+        self.assertIn(("IncidentResource.java::GET /incidents/{id}",
+                       "IncidentResource.java::IncidentResource.get"), self.rel("HANDLED_BY"))
+
+    def test_spring_mappings_carry_their_route_wherever_it_sits(self):
+        got = {s["summary"] for s in self.store.search("", "r", ontology="api_ontology", limit=50)
+               if s["kind"] == "Endpoint"}
+        self.assertIn("GET /api/v1/tasks/{id}", got)
+        self.assertIn("DELETE /api/v1/tasks/{id}", got)
+
+    def test_a_jpa_entity_has_a_table_fields_and_references(self):
+        entities = self.entities()
+        self.assertIn("Incident.java::Incident", entities)
+        self.assertEqual(entities["Incident.java::Incident"]["summary"], "table incidents")
+        self.assertIn(("Incident.java::Incident", "incidents"), self.rel("MAPS_TO"))
+        refs = {d for s_, d in self.rel("REFERENCES")}
+        self.assertEqual(refs, {"Team", "Comment"})
+        fields = {d.split(".")[-1] for s_, d in self.rel("HAS_FIELD")}
+        self.assertEqual(fields, {"id", "title", "owner", "comments"}, "@Transient is not a column")
+
+    def test_the_endpoint_trace_reaches_the_entity_when_the_handler_builds_one(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        chain = self.store.trace("IncidentResource.java::GET /incidents/{id}", "r")["chain"]
+        self.assertEqual(chain[0]["handler"], "IncidentResource.java::IncidentResource.get")
+        self.assertEqual(chain[0]["entity"], "Incident.java::Incident")
+        self.assertEqual(chain[0]["tables"], ["incidents"])
+
+
+class ManifestsAreKnowledgeNotNoise(_Indexed):
+    def setUp(self):
+        super().setUp()
+        self.write("package.json", '{"dependencies": {"react": "^18"}, "devDependencies": {"jest": "29"}}')
+        self.write("requirements.txt", "fastapi>=0.110\n# c\nsqlalchemy[asyncio]>=2\n")
+        self.write("pom.xml", '<project xmlns="http://maven.apache.org/POM/4.0.0"><dependencies>'
+                              '<dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId>'
+                              '</dependency></dependencies></project>')
+        self.write("pyproject.toml", '[project]\nname = "x"\ndependencies = ["httpx>=0.27"]\n')
+        self.build()
+
+    def test_manifests_are_not_degraded(self):
+        self.assertEqual(self.store.degraded("r"), [])
+        langs = {f["language"] for f in self.store.files("r")}
+        self.assertEqual(langs, {"manifest"})
+
+    def test_dependencies_are_findable(self):
+        from skygraph import tools as surface
+        out = surface.find_symbols(self.store, {"repo": "r", "query": "react",
+                                                "ontology": "deploy_ontology"})
+        self.assertEqual([r["name"] for r in out["results"]], ["package.json::dep:react"])
+        deps = {d.split("dep:")[-1] for s_, d in self.rel("DEPENDS_ON")}
+        self.assertEqual(deps, {"react", "jest", "fastapi", "sqlalchemy", "org.slf4j:slf4j-api", "httpx"})
+
+    def test_parsed_manifests_are_native_and_patterned_ones_are_not(self):
+        tiers = {r["path"]: r["tier"] for r in self.store.search("", "r", ontology="deploy_ontology", limit=50)}
+        self.assertEqual(tiers["package.json"], "native")
+        self.assertEqual(tiers["requirements.txt"], "query")
+
+
+class AModuleAndAnEndpointHaveAnEndLine(_Indexed):
+    def test_a_module_reads_as_an_exact_range(self):
+        self.write("a.py", "import os\n\ndef f():\n    pass\n")
+        self.build()
+        from skygraph import tools as surface
+        out = surface.read_source(self.store, {"qualified_name": "a.py"})
+        self.assertTrue(out["exact_range"])
+        self.assertEqual(out["to_line"], 4)
+
+    def test_a_python_endpoint_ends_where_its_handler_ends(self):
+        self.write("api.py", FASTAPI)
+        self.build()
+        ep = self.store.definition("api.py::POST /users", "r")
+        fn = self.store.definition("api.py::create_user", "r")
+        self.assertEqual(ep["end_line"], fn["end_line"])
+        self.assertGreater(ep["end_line"], ep["line"])
+
+
+class SkygraphForgetDropsARepo(unittest.TestCase):
+    def test_the_other_repo_is_untouched(self):
+        from skygraph.__main__ import main
+        tmp = tempfile.mkdtemp(); db = os.path.join(tmp, "g.db")
+        for name in ("keep", "drop"):
+            d = os.path.join(tmp, name); os.makedirs(d)
+            with open(os.path.join(d, "a.py"), "w") as fh:
+                fh.write(f"def {name}_fn():\n    pass\n")
+            index(d, repo=name, db=db)
+        import io as _io, contextlib
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["forget", "--repo", "drop", "--db", db])
+        self.assertEqual(json.loads(buf.getvalue())["files_forgotten"], 1)
+        store = Store(db)
+        self.assertEqual([r["repo"] for r in store.repos()], ["keep"])
+        self.assertEqual(store.search("fn", "drop"), [])
+        self.assertIsNone(store.root_of("drop"))
+
+
 class ImportDirectionIsMatchedOnTheModule(_Indexed):
     def test_a_file_does_not_import_itself(self):
         """`LIKE '%' || dst || '%'` made build-pptx.py import itself, via `pptx`."""

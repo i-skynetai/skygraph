@@ -44,6 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("symbol"); p.add_argument("--repo", required=True)
     p.add_argument("--branch", default="main"); p.add_argument("--db", default=DEFAULT_DB)
 
+    p = sub.add_parser("forget", help="drop one repository from the index")
+    p.add_argument("--repo", required=True); p.add_argument("--branch", default="main")
+    p.add_argument("--db", default=DEFAULT_DB)
+
     p = sub.add_parser("degraded", help="files that did not parse at their best tier")
     p.add_argument("--repo", required=True); p.add_argument("--branch", default="main")
     p.add_argument("--db", default=DEFAULT_DB)
@@ -74,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(Store(a.db).search(a.query, a.repo, a.branch), indent=2))
     elif a.cmd == "neighbours":
         print(json.dumps(Store(a.db).neighbours(a.symbol, a.repo, a.branch), indent=2))
+    elif a.cmd == "forget":
+        print(json.dumps({"repo": a.repo, "branch": a.branch,
+                          "files_forgotten": Store(a.db).forget(a.repo, a.branch)}))
     elif a.cmd == "degraded":
         print(json.dumps(Store(a.db).degraded(a.repo, a.branch), indent=2))
     elif a.cmd == "serve":

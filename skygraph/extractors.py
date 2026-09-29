@@ -266,7 +266,8 @@ def api_ontology_from_python(path: str, tree: ast.AST) -> tuple[list[Symbol], li
                     for verb in verbs:
                         endpoint = f"{path}::{verb} {route}"
                         symbols.append(Symbol(endpoint, "Endpoint", path, dec.lineno,
-                                              0, "native", summary=f"{verb} {route}"))
+                                              getattr(child, "end_lineno", 0) or 0,
+                                              "native", summary=f"{verb} {route}"))
                         edges.append(Edge(endpoint, "HANDLED_BY", handler, "native"))
             elif isinstance(child, ast.ClassDef):
                 visit(child, f"{path}::{child.name}")
@@ -650,3 +651,273 @@ def env_reads(path: str, source: str, lang: str | None) -> list[tuple[int, str]]
             if name:
                 found.append((i, name))
     return found
+
+
+# ── Java: JAX-RS and Spring endpoints, JPA entities ─────────────────────────
+
+#: A class-level route prefix. `@Path("/x")` is JAX-RS; `@RequestMapping("/x")` Spring.
+JAVA_CLASS_ROUTE = re.compile(r"""@(?:Path|RequestMapping)\s*\(\s*(?:value\s*=\s*)?["']([^"']*)["']""")
+#: A method-level verb: JAX-RS `@GET`, or Spring `@GetMapping("/y")` / `@RequestMapping(method = RequestMethod.GET, value = "/y")`.
+JAVA_VERB = re.compile(r"""@(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b""")
+JAVA_MAPPING = re.compile(r"""@(Get|Post|Put|Delete|Patch|Request)Mapping\b""")
+#: The route inside a mapping: the bare first string, or `value = "..."` / `path = "..."`
+#: wherever it sits among the other attributes.
+JAVA_MAPPING_ROUTE = re.compile(r"""(?:\(\s*|(?:value|path)\s*=\s*)["']([^"']*)["']""")
+JAVA_REQUEST_METHOD = re.compile(r"""RequestMethod\.(GET|POST|PUT|DELETE|PATCH)""")
+JAVA_METHOD_PATH = re.compile(r"""@Path\s*\(\s*(?:value\s*=\s*)?["']([^"']*)["']""")
+JAVA_CLASS = re.compile(r"""^\s*(?:public\s+|abstract\s+|final\s+)*(?:class|interface)\s+(\w+)""")
+JAVA_METHOD = re.compile(r"""^\s*(?:public|protected|private|static|final|synchronized|default|\s)*[\w<>\[\],.? ]+?\s+(\w+)\s*\(""")
+
+
+JAVA_PATH_EXPR = re.compile(r"""@Path\s*\(\s*([^)]*?)\s*\)""", re.S)
+JAVA_STRING = re.compile(r"""["']([^"']*)["']""")
+
+
+def _route_of(annotation: str) -> str:
+    """The route a `@Path(...)` names. A literal when there is one; otherwise the
+    constant expression it is built from, in braces — `{Constants.PATH}` — because
+    "a POST handled by this method, at a route named by that constant" is still
+    an answer, and dropping the endpoint is not."""
+    m = JAVA_PATH_EXPR.search(annotation)
+    if not m:
+        return ""
+    literal = JAVA_STRING.search(m.group(1))
+    if literal:
+        return literal.group(1)
+    expr = " ".join(m.group(1).split())
+    return "{" + expr[:60] + "}" if expr else ""
+
+
+def api_ontology_from_java(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
+    """Endpoints from JAX-RS (`@Path`, `@GET`) and Spring (`@GetMapping`) annotations,
+    joined to the method beneath. Read by pattern — annotations are the lines above a
+    method — so tier 2.
+
+    Annotations are read as a block, by parenthesis depth: `@Path(` split over three
+    lines and built from constants, then a nine-line `@Operation(...)`, then the
+    method. Reading line by line found 3 of 26 files' routes; the rest were dropped
+    at the first continuation line.
+    """
+    symbols: list[Symbol] = []
+    edges: list[Edge] = []
+    class_name, class_prefix = "", ""
+    block, depth, block_line = "", 0, 0
+
+    def verbs_in(text: str) -> list[str]:
+        found = [m.group(1) for m in JAVA_VERB.finditer(text)]
+        for m in JAVA_MAPPING.finditer(text):
+            verb = m.group(1).upper()
+            if verb == "REQUEST":
+                rm = JAVA_REQUEST_METHOD.search(text)
+                verb = rm.group(1) if rm else "ANY"
+            found.append(verb)
+        return found
+
+    def mapping_route(text: str) -> str:
+        if JAVA_MAPPING.search(text):
+            m = JAVA_MAPPING_ROUTE.search(text[JAVA_MAPPING.search(text).start():])
+            if m:
+                return m.group(1)
+        return _route_of(text)
+
+    for i, line in enumerate(source.splitlines(), 1):
+        stripped = line.strip()
+        if depth > 0 or stripped.startswith("@"):
+            block += " " + stripped
+            block_line = block_line or i
+            depth = max(0, depth + stripped.count("(") - stripped.count(")"))
+            continue
+        if not stripped or stripped.startswith(("//", "*", "/*")):
+            continue
+        klass = JAVA_CLASS.match(line)
+        if klass:
+            class_name = klass.group(1)
+            class_prefix = (mapping_route(block) if block else "").rstrip("/")
+            block, block_line = "", 0
+            continue
+        if block and class_name:
+            method = JAVA_METHOD.match(line)
+            verbs = verbs_in(block)
+            if method and verbs and not stripped.startswith(("return", "if", "for", "while", "new ")):
+                own = mapping_route(block).strip("/")
+                route = "/" + "/".join(part for part in (class_prefix.strip("/"), own) if part)
+                handler = f"{path}::{class_name}.{method.group(1)}"
+                for verb in verbs:
+                    endpoint = f"{path}::{verb} {route}"
+                    symbols.append(Symbol(endpoint, "Endpoint", path, block_line or i, 0,
+                                          "query", summary=f"{verb} {route}"))
+                    edges.append(Edge(endpoint, "HANDLED_BY", handler, "query"))
+        block, block_line = "", 0
+    return symbols, edges
+
+
+JAVA_FIELD = re.compile(r"""^\s*(?:private|protected|public)?\s*(?:final\s+)?([\w.<>,\[\] ?]+?)\s+(\w+)\s*(?:=|;)""")
+JAVA_TABLE = re.compile(r"""@Table\s*\(.*?name\s*=\s*["'](\w+)["']""")
+JAVA_RELATION = re.compile(r"""@(?:ManyToOne|OneToOne|OneToMany|ManyToMany)\b""")
+JAVA_SKIP_FIELD = re.compile(r"""@Transient\b""")
+GENERIC_ARG = re.compile(r"""<\s*([\w.]+)\s*>""")
+
+
+def data_ontology_from_java(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
+    """JPA entities: `@Entity` classes, their `@Table` names, their fields, and the
+    entities their relations point at. Read by pattern, so tier 2.
+
+    Every non-transient field of an entity is a column by JPA's own default, so
+    fields need no annotation to count; a relation annotation makes a field a
+    reference to the entity it names — the field's type, or the generic argument of
+    a collection.
+    """
+    symbols: list[Symbol] = []
+    edges: list[Edge] = []
+    lines = source.splitlines()
+    entity = ""
+    is_entity = table = ""
+    relation = skip = False
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if "@Entity" in stripped and stripped.startswith("@"):
+            is_entity = "yes"; continue
+        m = JAVA_TABLE.search(stripped)
+        if m and stripped.startswith("@"):
+            table = m.group(1); continue
+        klass = JAVA_CLASS.match(line)
+        if klass:
+            if is_entity:
+                entity = f"{path}::{klass.group(1)}"
+                symbols.append(Symbol(entity, "Entity", path, i, 0, "query",
+                                      summary=f"table {table}" if table else "JPA entity"))
+                if table:
+                    edges.append(Edge(entity, "MAPS_TO", table, "query"))
+            else:
+                entity = ""
+            is_entity = table = ""
+            continue
+        if not entity:
+            continue
+        if stripped.startswith("@"):
+            relation = relation or bool(JAVA_RELATION.search(stripped))
+            skip = skip or bool(JAVA_SKIP_FIELD.search(stripped))
+            continue
+        field = JAVA_FIELD.match(line)
+        if field and "(" not in stripped.split("=")[0] and not stripped.startswith(("return", "static")):
+            kind, name = field.group(1).strip(), field.group(2)
+            if not skip and kind not in ("class", "interface", "enum", "import", "package"):
+                full = f"{entity}.{name}"
+                symbols.append(Symbol(full, "Field", path, i, 0, "query", summary=kind))
+                edges.append(Edge(entity, "HAS_FIELD", full, "query"))
+                if relation:
+                    target = GENERIC_ARG.search(kind)
+                    ref = (target.group(1) if target else kind).rsplit(".", 1)[-1]
+                    edges.append(Edge(entity, "REFERENCES", ref, "query"))
+            relation = skip = False
+        elif stripped.endswith("{") or stripped.startswith("}"):
+            relation = skip = False
+    return symbols, edges
+
+
+# ── Manifests: what the project depends on ─────────────────────────────────
+
+MANIFEST_FILES = ("package.json", "pom.xml", "build.gradle", "build.gradle.kts",
+                  "requirements.txt", "requirements-dev.txt", "pyproject.toml", "go.mod",
+                  "Cargo.toml", "Gemfile", "composer.json")
+
+
+def is_manifest(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return name in MANIFEST_FILES or (name.startswith("requirements") and name.endswith(".txt"))
+
+
+GRADLE_DEP = re.compile(r"""^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|"""
+                        r"""testRuntimeOnly|annotationProcessor|kapt|compile|testCompile)"""
+                        r"""\s*\(?\s*["']([^"':]+:[^"':]+)(?::[^"']*)?["']""")
+GEM = re.compile(r"""^\s*gem\s+["']([^"']+)["']""")
+GO_REQUIRE = re.compile(r"""^\s*(?:require\s+)?([\w.\-/]+\.[\w.\-/]+)\s+v[\w.\-+]+""")
+PY_REQ = re.compile(r"""^\s*([A-Za-z0-9][A-Za-z0-9._\-]*)""")
+
+
+def deploy_from_manifest(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
+    """Dependencies a manifest declares — one `Dependency` per package, `DEPENDS_ON`
+    from the manifest. JSON, TOML and XML are parsed with the standard library and
+    are tier 1; Gradle, Gemfile, go.mod and requirements are line patterns, tier 2.
+
+    A manifest used to index as "unknown, heuristic": noise in the degraded list and
+    no knowledge. An agent asked "does this project use X" now has an answer.
+    """
+    name = path.rsplit("/", 1)[-1]
+    found: list[tuple[str, str, str]] = []                # (package, version, tier)
+    try:
+        if name in ("package.json", "composer.json"):
+            doc = json.loads(source)
+            for key in ("dependencies", "devDependencies", "peerDependencies", "require",
+                        "require-dev"):
+                for pkg, ver in (doc.get(key) or {}).items() if isinstance(doc, dict) else []:
+                    found.append((str(pkg), str(ver), "native"))
+        elif name in ("pyproject.toml", "Cargo.toml"):
+            import tomllib
+            doc = tomllib.loads(source)
+            project = doc.get("project") or {}
+            for spec in project.get("dependencies") or []:
+                m = PY_REQ.match(str(spec))
+                if m:
+                    found.append((m.group(1), str(spec)[len(m.group(1)):].strip(), "native"))
+            for group in (project.get("optional-dependencies") or {}).values():
+                for spec in group or []:
+                    m = PY_REQ.match(str(spec))
+                    if m:
+                        found.append((m.group(1), str(spec)[len(m.group(1)):].strip(), "native"))
+            poetry = (doc.get("tool") or {}).get("poetry") or {}
+            for key in ("dependencies", "dev-dependencies"):
+                for pkg, ver in (poetry.get(key) or {}).items():
+                    if pkg != "python":
+                        found.append((pkg, str(ver), "native"))
+            for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                for pkg, ver in (doc.get(key) or {}).items():
+                    found.append((pkg, ver if isinstance(ver, str) else str(ver.get("version", "")), "native"))
+        elif name == "pom.xml":
+            from xml.etree import ElementTree
+            root = ElementTree.fromstring(source)
+            for dep in root.iter():
+                if dep.tag.rsplit("}", 1)[-1] != "dependency":
+                    continue
+                parts = {c.tag.rsplit("}", 1)[-1]: (c.text or "").strip() for c in dep}
+                if parts.get("artifactId"):
+                    found.append((f"{parts.get('groupId', '')}:{parts['artifactId']}".strip(":"),
+                                  parts.get("version", ""), "native"))
+        elif name.startswith("build.gradle"):
+            for line in source.splitlines():
+                m = GRADLE_DEP.match(line)
+                if m:
+                    found.append((m.group(1), "", "query"))
+        elif name == "go.mod":
+            for line in source.splitlines():
+                m = GO_REQUIRE.match(line)
+                if m and not line.strip().startswith("module"):
+                    found.append((m.group(1), line.split()[-1] if line.split() else "", "query"))
+        elif name == "Gemfile":
+            for line in source.splitlines():
+                m = GEM.match(line)
+                if m:
+                    found.append((m.group(1), "", "query"))
+        elif name.startswith("requirements"):
+            for line in source.splitlines():
+                text = line.split("#", 1)[0].strip()
+                if not text or text.startswith(("-", "git+", "http")):
+                    continue
+                m = PY_REQ.match(text)
+                if m:
+                    found.append((m.group(1), text[len(m.group(1)):].strip(), "query"))
+    except Exception:                                      # noqa: BLE001 — a broken manifest declares nothing
+        return [], []
+
+    symbols: list[Symbol] = []
+    edges: list[Edge] = []
+    seen: set[str] = set()
+    for pkg, ver, tier in found:
+        if not pkg or pkg in seen:
+            continue
+        seen.add(pkg)
+        dep = f"{path}::dep:{pkg}"
+        symbols.append(Symbol(dep, "Dependency", path, 1, 0, tier,
+                              summary=f"{pkg} {ver}".strip()))
+        edges.append(Edge(path, "DEPENDS_ON", dep, tier))
+    return symbols, edges
