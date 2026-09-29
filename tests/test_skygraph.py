@@ -825,6 +825,57 @@ class ABarrelForwardsWhatItExports(_Indexed):
         self.assertIn(("main.py::go", "pkg/user.py::User.save"), self.rel("CALLS"))
 
 
+class ACallOnAnInterfaceReachesItsImplementations(_Indexed):
+    """`private final FooService svc; svc.find()` places the call on the interface —
+    correctly — and then "who calls `FooServiceImpl.find`" answered nothing. Half of a
+    Java service's unresolved calls looked like that."""
+
+    def test_java_callers_through_the_interface_are_reported_via_it(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("FooService.java", "public interface FooService {\n    boolean find(String n);\n}\n")
+        self.write("FooServiceImpl.java", "public class FooServiceImpl implements FooService {\n"
+                                          "    public boolean find(String n) { return true; }\n}\n")
+        self.write("Handler.java", "public class Handler {\n    private final FooService svc;\n"
+                                   "    public boolean handle(String n) { return svc.find(n); }\n}\n")
+        self.build()
+        from skygraph import tools as surface
+        self.assertIn(("FooServiceImpl.java::FooServiceImpl", "FooService.java::FooService"),
+                      self.rel("IMPLEMENTS"))
+        impl = surface.expand_symbol(self.store, {"qualified_name": "FooServiceImpl.java::FooServiceImpl.find"})
+        callers = {c["other"]: c.get("via") for c in impl["called_by"]}
+        self.assertEqual(callers, {"Handler.java::Handler.handle": "FooService.java::FooService.find"})
+        self.assertEqual(impl["overrides"], ["FooService.java::FooService.find"])
+        iface = surface.expand_symbol(self.store, {"qualified_name": "FooService.java::FooService.find"})
+        self.assertEqual(iface["implemented_by"], ["FooServiceImpl.java::FooServiceImpl.find"])
+        blast = surface.blast_radius(self.store, {"repo": "r", "symbol": "FooServiceImpl.java::FooServiceImpl.find",
+                                                  "direction": "up", "hops": 2})
+        self.assertIn("Handler.java::Handler.handle", {c["symbol"] for c in blast["callers"]})
+
+    def test_python_subclasses_are_walked_too(self):
+        self.write("base.py", "class Base:\n    def run(self):\n        pass\n")
+        self.write("child.py", "from base import Base\n\nclass Child(Base):\n    def run(self):\n        pass\n")
+        self.write("app.py", "from base import Base\n\ndef go(x: Base):\n    return x.run()\n")
+        self.build()
+        self.assertIn(("child.py::Child", "base.py::Base"), self.rel("INHERITS"))
+        hops = self.store.neighbours("child.py::Child.run", "r", rels=("CALLS",))
+        self.assertEqual([(h["other"], h["via"]) for h in hops if h["dir"] == "in"],
+                         [("app.py::go", "base.py::Base.run")])
+
+    def test_a_direct_caller_is_not_also_listed_via_the_interface(self):
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        self.write("R.ts", "export interface Repo { save(): void }\n")
+        self.write("S.ts", "import { Repo } from './R';\nexport class SqlRepo implements Repo { save() {} }\n")
+        self.write("A.ts", "import { Repo } from './R';\nimport { SqlRepo } from './S';\n"
+                           "export function a(r: Repo) { r.save(); }\n"
+                           "export function b() { const s = new SqlRepo(); s.save(); }\n")
+        self.build()
+        hops = self.store.neighbours("S.ts::SqlRepo.save", "r", rels=("CALLS",))
+        got = {h["other"]: h.get("via") for h in hops if h["dir"] == "in"}
+        self.assertEqual(got, {"A.ts::b": None, "A.ts::a": "R.ts::Repo.save"})
+
+
 class AJavaClassSeesItsPackage(_Indexed):
     """Two honest gaps the benchmark documented, now closed."""
 

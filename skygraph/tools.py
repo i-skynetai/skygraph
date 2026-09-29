@@ -182,15 +182,26 @@ def expand_symbol(store: Store, args: dict) -> dict:
            "called_by": [_hop(h) for h in hops if h["dir"] == "in"]}
     if found["kind"] == "Endpoint":
         out["trace"] = store.trace(name, *scope)["chain"]
+    if found["kind"] == "Method":
+        # A method on an interface is implemented elsewhere; a method on a class may
+        # implement one. Both are the answer to "what actually runs".
+        above, below = store.overrides_of(name, *scope), store.implementations_of(name, *scope)
+        if above:
+            out["overrides"] = above
+        if below:
+            out["implemented_by"] = below
     return out
 
 
 def _hop(hop: dict) -> dict:
     """A neighbour without the direction the list already states, and without the
-    relation when it is the usual one."""
+    relation when it is the usual one. `via` names the interface a dispatched caller
+    called through."""
     out = {"other": hop["other"], "tier": hop["tier"]}
     if hop["rel"] != "CALLS":
         out["rel"] = hop["rel"]
+    if hop.get("via"):
+        out["via"] = hop["via"]
     return out
 
 
@@ -346,7 +357,8 @@ def blast_radius(store: Store, args: dict) -> dict:
                     if h["dir"] != ("out" if outward else "in") or h["other"] in seen:
                         continue
                     seen.add(h["other"])
-                    rows.append({"symbol": h["other"], "depth": depth, "tier": h["tier"]})
+                    rows.append({"symbol": h["other"], "depth": depth, "tier": h["tier"],
+                                 **({"via": h["via"]} if h.get("via") else {})})
                     nxt.append(h["other"])
             frontier = nxt
             if not frontier:

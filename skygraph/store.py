@@ -293,6 +293,8 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.rebuilt = self._reset_if_stale()
         self.db.executescript(DDL)
+        #: (repo, branch) → (supertypes of each class, subtypes of each class).
+        self._subtypes_cache: dict[tuple[str, str], tuple[dict, dict]] = {}
 
     def _reset_if_stale(self) -> bool:
         found = self.db.execute("PRAGMA user_version").fetchone()[0]
@@ -792,6 +794,21 @@ class Store:
                 return candidates[0], "unique"
             return "", ("ambiguous" if candidates else unplaced(bare))
 
+        # Subtype edges name a bare type — `FooService` — and are placed the way a
+        # typed receiver is. Resolved, they are what lets a call on an interface reach
+        # the classes that implement it.
+        with self.db:
+            cur = self.db.cursor()
+            for row in self.db.execute(
+                    "SELECT rowid, path, raw_dst FROM edges WHERE repo=? AND branch=? "
+                    "AND rel IN ('INHERITS', 'IMPLEMENTS')", (repo, branch)).fetchall():
+                cls = place_class(row["path"], row["raw_dst"].rsplit(".", 1)[-1],
+                                  language.get(row["path"]))
+                cur.execute("UPDATE edges SET dst=?, resolution=? WHERE rowid=?",
+                            (cls or row["raw_dst"], "resolved" if cls else "external",
+                             row["rowid"]))
+        self._subtypes_cache.pop((repo, branch), None)
+
         with self.db:
             cur = self.db.cursor()
             for row in self.db.execute(
@@ -1129,9 +1146,59 @@ class Store:
             "ORDER BY s.line", (repo, branch, name)).fetchall()
         return [dict(r) for r in rows]
 
+    def subtypes(self, repo: str, branch: str = "main") -> tuple[dict, dict]:
+        """(supertypes by class, subtypes by class), from resolved INHERITS and
+        IMPLEMENTS edges. Cached per store; the server opens a new store when the
+        index changes, so the cache never outlives the data."""
+        key = (repo, branch)
+        if key not in self._subtypes_cache:
+            supers: dict[str, set[str]] = {}
+            subs: dict[str, set[str]] = {}
+            for row in self.db.execute(
+                    "SELECT src, dst FROM edges WHERE repo=? AND branch=? "
+                    "AND rel IN ('INHERITS', 'IMPLEMENTS') AND resolution='resolved'",
+                    (repo, branch)):
+                supers.setdefault(row["src"], set()).add(row["dst"])
+                subs.setdefault(row["dst"], set()).add(row["src"])
+            self._subtypes_cache[key] = (supers, subs)
+        return self._subtypes_cache[key]
+
+    def _related_methods(self, symbol: str, repo: str, branch: str, upward: bool) -> list[str]:
+        """`Impl.find` → `FooService.find` (upward) or the reverse, transitively,
+        for every supertype or subtype that declares the same method name."""
+        if "::" not in symbol or "." not in symbol.rsplit("::", 1)[-1]:
+            return []
+        owner, bare = symbol.rsplit(".", 1)
+        supers, subs = self.subtypes(repo, branch)
+        graph = supers if upward else subs
+        seen, queue, found = {owner}, [owner], []
+        while queue and len(seen) < 64:
+            for nxt in graph.get(queue.pop(0), ()):
+                if nxt in seen:
+                    continue
+                seen.add(nxt); queue.append(nxt)
+                candidate = f"{nxt}.{bare}"
+                if self.db.execute("SELECT 1 FROM symbols WHERE repo=? AND branch=? AND name=?",
+                                   (repo, branch, candidate)).fetchone():
+                    found.append(candidate)
+        return found
+
+    def overrides_of(self, symbol: str, repo: str, branch: str = "main") -> list[str]:
+        return self._related_methods(symbol, repo, branch, upward=True)
+
+    def implementations_of(self, symbol: str, repo: str, branch: str = "main") -> list[str]:
+        return self._related_methods(symbol, repo, branch, upward=False)
+
     def neighbours(self, symbol: str, repo: str, branch: str = "main",
                    rels: tuple[str, ...] = ("CALLS", "IMPORTS")) -> list[dict]:
-        """One hop, both directions — the callee in another file, and the caller."""
+        """One hop, both directions — the callee in another file, and the caller.
+
+        A call resolved to an interface's method is a call to whatever implements it,
+        so the callers of `FooService.find` are callers of `FooServiceImpl.find` too.
+        They are included, marked `via` the type the call was written against, because
+        an agent that cannot tell a direct caller from a dispatched one will mis-read
+        the blast radius of a change either way.
+        """
         marks = ",".join("?" * len(rels))
         out = self.db.execute(
             f"SELECT dst AS other, rel, tier, 'out' AS dir FROM edges "
@@ -1140,7 +1207,16 @@ class Store:
             f"SELECT src AS other, rel, tier, 'in' AS dir FROM edges "
             f"WHERE repo=? AND branch=? AND dst=? AND rel IN ({marks})",
             (repo, branch, symbol, *rels, repo, branch, symbol, *rels)).fetchall()
-        return [dict(r) for r in out]
+        rows = [dict(r) for r in out]
+        if "CALLS" in rels:
+            direct = {r["other"] for r in rows if r["dir"] == "in"}
+            for above in self.overrides_of(symbol, repo, branch):
+                for r in self.db.execute(
+                        "SELECT src AS other, rel, tier FROM edges WHERE repo=? AND branch=? "
+                        "AND dst=? AND rel='CALLS'", (repo, branch, above)):
+                    if r["other"] not in direct:
+                        rows.append({**dict(r), "dir": "in", "via": above})
+        return rows
 
     def files(self, repo: str, branch: str = "main", prefix: str = "",
               limit: int = 500) -> list[dict]:
@@ -1222,6 +1298,9 @@ class Store:
             "inferred_symbols": total - parsed,
             "parsed_share": round(parsed / total, 3) if total else 1.0,
             "call_edges": calls,
+            "subtype_edges": {r["resolution"]: r["n"] for r in self.db.execute(
+                "SELECT resolution, COUNT(*) AS n FROM edges WHERE repo=? AND branch=? "
+                "AND rel IN ('INHERITS','IMPLEMENTS') GROUP BY resolution", (repo, branch))},
             "links": {rel: self._count_rel(repo, branch, rel)
                       for rel in ("HANDLED_BY", "PERSISTS_TO", "MAPS_TO",
                                   "DEPLOYED_BY", "CONFIGURED_BY")},

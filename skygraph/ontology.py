@@ -46,7 +46,10 @@ CODE_ONTOLOGY = Ontology(
     kinds=("Module", "Class", "Function", "Method", "Variable"),
     # RE_EXPORTS: a barrel — `export * from './x'`, or a Python `__init__` — passes a
     # module's names on. Not an import: the barrel uses nothing, it forwards.
-    relations=("CONTAINS", "CALLS", "IMPORTS", "INHERITS", "RE_EXPORTS"),
+    # IMPLEMENTS: a class satisfying an interface, a trait, a protocol. INHERITS is
+    # `extends`. Both are subtype edges, and both are what lets "who calls
+    # `FooServiceImpl.find`" include the callers of `FooService.find`.
+    relations=("CONTAINS", "CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "RE_EXPORTS"),
     absent_means="no source file in this repository was readable by any tier",
 )
 

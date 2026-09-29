@@ -323,6 +323,41 @@ def _retype(target: str, locals_: dict, fields: dict) -> str:
 CONSTRUCTOR_IS_A_CALL = {"kotlin", "swift", "scala"}
 
 
+#: Where each grammar writes `extends` and `implements`, and which it means. C# lists
+#: both in one `base_list`; its convention (`IFoo`) tells them apart. Kotlin's
+#: `delegation_specifier` calls a constructor for a superclass and names an interface
+#: bare.
+HERITAGE = {"superclass": "INHERITS", "super_interfaces": "IMPLEMENTS",
+            "extends_clause": "INHERITS", "implements_clause": "IMPLEMENTS",
+            "base_clause": "INHERITS", "class_interface_clause": "IMPLEMENTS",
+            "inheritance_specifier": "INHERITS", "delegation_specifier": "INHERITS",
+            "base_list": "INHERITS", "class_heritage": ""}
+
+
+def _supertypes(node) -> list[tuple[str, str]]:
+    """(relation, type name) for every supertype a container declares."""
+    out: list[tuple[str, str]] = []
+    if node.type == "impl_item":                          # rust: `impl Trait for Type`
+        trait = _type_name(node.child_by_field_name("trait"))
+        return [("IMPLEMENTS", trait)] if trait else []
+    clauses = [c for c in node.children if c.type in HERITAGE]
+    clauses += [g for c in clauses if c.type == "class_heritage" for g in c.children if g.type in HERITAGE]
+    for clause in clauses:
+        rel = HERITAGE[clause.type]
+        if not rel:
+            continue
+        if clause.type == "delegation_specifier":
+            rel = "INHERITS" if any(c.type == "constructor_invocation" for c in clause.children) else "IMPLEMENTS"
+        for name in {_text(n) for n in _descendants(clause, TYPE_NAME_NODES)}:
+            name = _capitalised(name)
+            if not name:
+                continue
+            if clause.type == "base_list":
+                rel = "IMPLEMENTS" if len(name) > 1 and name[0] == "I" and name[1].isupper() else "INHERITS"
+            out.append((rel, name))
+    return out
+
+
 #: `this` and `self` mean the enclosing class in every language here, and the resolver
 #: already knows what `self.` means. Normalising at the edge keeps one rule.
 RECEIVER_SELF = re.compile(r"^(?:this|self)\.")
@@ -529,10 +564,14 @@ def parse(path: str, source: str, language: str) -> FileResult:
     def walk(node, owner: str, enclosing: str, fields: dict, locals_: dict) -> None:
         what = role.get(node.id)
         if what == "container":
-            name = _name_of(node)
+            # `impl Trait for Type` is a container for Type's methods, not Trait's.
+            name = (_type_name(node.child_by_field_name("type")) if node.type == "impl_item"
+                    and node.child_by_field_name("type") is not None else _name_of(node))
             if name:
                 qualified = declare(name, "Class", node)
                 out.edges.append(Edge(owner or path, "CONTAINS", qualified, "native"))
+                for rel, base in _supertypes(node):
+                    out.edges.append(Edge(qualified, rel, base, "native"))
                 own = bindings_under(node, container=True)
                 # `impl A` in Rust owns no fields; `struct A` does. Share by name.
                 struct_fields.setdefault(name, {}).update(own)
