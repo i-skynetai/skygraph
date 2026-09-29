@@ -72,7 +72,7 @@ def _compact(row: dict, scope: bool = True) -> dict:
             continue
         if key == "ontology" and value == "code_ontology":
             continue
-        if key in ("summary", "degraded") and not value:
+        if key in ("summary", "degraded", "exact") and not value:
             continue
         out[key] = value
     return out
@@ -102,11 +102,22 @@ def find_symbols(store: Store, args: dict) -> dict:
     repo, branch = args.get("repo", ""), args.get("branch", "main")
     asked = int(args.get("limit", 10)) if str(args.get("limit", 10)).lstrip("-").isdigit() else 10
     found = store.search(query, repo, branch, _rows(args, default=10), args.get("ontology", ""))
+    # "Where is X" for a name that exists is one row. The nine others — names that
+    # merely contain X — cost twenty times the grep and answer a question nobody
+    # asked. They are still there for anyone who passes `limit`.
+    exact = [r for r in found if r.get("exact")]
+    note = ""
+    if exact and "limit" not in args and len(exact) < len(found):
+        note = (f"{len(found) - len(exact)} more names contain {query!r}; pass limit to "
+                "see them")
+        found = exact
     out: dict = {"results": [_compact(r, scope=bool(repo)) for r in found]}
     if repo:
         out.update(repo=repo, branch=branch)
     if asked > MAX_ROWS:
-        out["note"] = f"limit capped at {MAX_ROWS}; narrow the query rather than paging"
+        note = f"limit capped at {MAX_ROWS}; narrow the query rather than paging"
+    if note:
+        out["note"] = note
     return out
 
 

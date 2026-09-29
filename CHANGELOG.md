@@ -20,6 +20,8 @@
   symbols and `DEPENDS_ON` edges in the deploy ontology instead of "unknown" noise.
 - Modules and Python endpoints carry an end line, so `read_source` on either is exact.
 - `skygraph forget --repo X` drops a repository from the index.
+- `find_symbols` answers an exact name with that row alone unless `limit` is passed:
+  a unique-name lookup fell from 2.8 KB to under 0.5 KB.
 
 ## 0.2.0 — 2026-09-27
 

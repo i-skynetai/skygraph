@@ -1046,7 +1046,8 @@ class Store:
             "SELECT name, kind, path, line, end_line, tier, ontology, summary, returns, repo, branch, "
             f"{rank} AS rank FROM symbols WHERE {' AND '.join(where)} "
             "ORDER BY rank, length(name), name LIMIT ?", args).fetchall()
-        return [{k: r[k] for k in r.keys() if k != "rank"} for r in rows]
+        return [{**{k: r[k] for k in r.keys() if k != "rank"}, "exact": r["rank"] == 0}
+                for r in rows]
 
     def definition(self, name: str, repo: str = "", branch: str = "main",
                    ontology: str = "") -> dict | None:

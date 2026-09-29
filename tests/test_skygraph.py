@@ -2022,20 +2022,27 @@ class AnswersCarryNoRepeatedFields(_Indexed):
         self.surface = surface
 
     def test_the_exact_name_comes_first_not_the_shortest_containing_it(self):
-        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set", "limit": 10})
         self.assertEqual(out["results"][0]["name"], "a.py::set")
         self.assertEqual([r["name"] for r in out["results"][:3]],
                          ["a.py::set", "a.py::setup", "a.py::Settings"])
 
-    def test_a_scoped_list_says_the_scope_once(self):
+    def test_an_exact_name_is_one_row_unless_more_are_asked_for(self):
         out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
+        self.assertEqual([r["name"] for r in out["results"]], ["a.py::set"])
+        self.assertIn("more names contain", out["note"])
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set", "limit": 10})
+        self.assertGreater(len(out["results"]), 1)
+
+    def test_a_scoped_list_says_the_scope_once(self):
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set", "limit": 10})
         self.assertEqual(out["repo"], "r")
         for row in out["results"]:
             self.assertNotIn("repo", row)
             self.assertNotIn("ontology", row)
 
     def test_an_unscoped_search_keeps_the_repo_on_each_row(self):
-        out = self.surface.find_symbols(self.store, {"query": "set"})
+        out = self.surface.find_symbols(self.store, {"query": "set", "limit": 10})
         self.assertTrue(all("repo" in row for row in out["results"]))
 
     def test_the_docstring_first_line_is_the_summary(self):
@@ -2049,8 +2056,8 @@ class AnswersCarryNoRepeatedFields(_Indexed):
         body = "".join(f"def set{i}():\n    pass\n" for i in range(30))
         self.write("many.py", body)
         self.build()
-        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "set"})
-        self.assertEqual(len(out["results"]), 10)
+        out = self.surface.find_symbols(self.store, {"repo": "r", "query": "se"})
+        self.assertEqual(len(out["results"]), 10, "nothing is named exactly `se`, so ten rows")
 
     def test_health_reference_is_opt_in(self):
         out = self.surface.index_health(self.store, {"repo": "r"})

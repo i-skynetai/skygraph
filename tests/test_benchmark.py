@@ -127,8 +127,8 @@ class GoldenQuestionsPython(_Bench):
     def test_where_is_x_costs_no_more_than_the_grep_for_it(self):
         """A grep for a unique name is about 130 bytes per hit. The answer to "where is
         X" for a unique name must be one row, not ten rows of names containing X."""
-        out = self.ask("find_symbols", 400, query="find_user", repo="bench")
-        self.assertEqual(out["results"][0]["name"], "app/repo.py::find_user")
+        out = self.ask("find_symbols", 300, query="find_user", repo="bench")
+        self.assertEqual([r["name"] for r in out["results"]], ["app/repo.py::find_user"])
 
     def test_the_median_answer_is_under_four_hundred_tokens(self):
         sizes = []
