@@ -1,0 +1,7 @@
+# The source archive carries what a packager needs to rebuild and re-test the release,
+# not only what the wheel installs.
+include CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md skygraph-mcp
+recursive-include docs *.md *.svg *.png
+recursive-include tests *.py
+graft tests/fixtures
+global-exclude __pycache__ *.py[cod] .DS_Store

@@ -1213,6 +1213,36 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
                         "the server destroyed a newer index")
 
 
+class BothCommandsSayTheirVersion(unittest.TestCase):
+    """The first thing asked in a bug report, and the thing to check after an upgrade."""
+
+    def test_skygraph_and_skygraph_mcp_print_the_package_version(self):
+        import contextlib, io
+        from skygraph import __version__
+        from skygraph.__main__ import main
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said), self.assertRaises(SystemExit) as done:
+            main(["--version"])
+        self.assertEqual(done.exception.code, 0)
+        self.assertEqual(said.getvalue().strip(), f"skygraph {__version__}")
+
+        import subprocess
+        from unittest import mock
+        from skygraph.__main__ import serve_entry
+        said = io.StringIO()
+        with mock.patch.object(sys, "argv", ["skygraph-mcp", "--version"]), \
+                contextlib.redirect_stdout(said), self.assertRaises(SystemExit):
+            serve_entry()
+        self.assertEqual(said.getvalue().strip(), f"skygraph-mcp {__version__}")
+
+        launcher = REPO / "skygraph-mcp"
+        if launcher.is_file():
+            out = subprocess.run([str(launcher), "--version"], stdin=subprocess.DEVNULL,
+                                 capture_output=True, text=True, timeout=30)
+            self.assertEqual(out.stdout.strip(), f"skygraph-mcp {__version__}",
+                             "the checkout launcher started serving instead of answering")
+
+
 class TheParsersComeWithTheInstall(unittest.TestCase):
     """An install that quietly lacked them indexed every language but Python without a
     single call edge — correct, empty, and indistinguishable from a quiet codebase."""
@@ -2364,7 +2394,8 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         self.assertEqual(server["type"], "stdio")
         self.assertTrue(server["command"].endswith("skygraph-mcp"))
         self.assertEqual(server["args"][:2], ["--repo", "demo"])
-        self.assertTrue(os.path.isabs(server["command"]) or server["command"] == "skygraph-mcp")
+        self.assertTrue(os.path.isabs(server["command"]),
+                        "a host started from a dock has no shell PATH to find a bare name")
 
     def test_it_merges_with_an_existing_mcp_json(self):
         with open(os.path.join(self.project, ".mcp.json"), "w") as fh:
@@ -2392,6 +2423,20 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         self.install.init(self.project, "demo", self.db, hook=True, out=self.quiet)
         cfg = json.load(open(os.path.join(self.project, ".claude", "settings.json")))
         self.assertEqual(len(cfg["hooks"]["SessionStart"]), 1, "not duplicated")
+
+    def test_the_hook_survives_a_path_with_a_space(self):
+        """A shell runs the hook. Unquoted, "My Projects" indexed "My" and failed."""
+        import shlex
+        spaced = os.path.join(tempfile.mkdtemp(), "My Projects")
+        os.mkdir(spaced)
+        with open(os.path.join(spaced, "a.py"), "w") as fh:
+            fh.write("def go():\n    pass\n")
+        self.install.init(spaced, "demo", self.db, hook=True, out=self.quiet)
+        cfg = json.load(open(os.path.join(spaced, ".claude", "settings.json")))
+        words = shlex.split(cfg["hooks"]["SessionStart"][0]["hooks"][0]["command"])
+        self.assertTrue(os.path.isabs(words[0]), words[0])
+        self.assertIn(os.path.realpath(spaced), [os.path.realpath(w) for w in words],
+                      "the project path was split by the shell")
 
     def test_it_indexes_and_reports_one_line(self):
         written = self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)

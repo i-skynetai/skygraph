@@ -13,9 +13,10 @@ empty and correct, which is the worst combination: an agent cannot tell a thin g
 from a complete one by querying it.
 
 **One interpreter, one query file per language.** `queries/<language>.scm` names the
-node types that are containers, callables, bound functions, calls and imports — five
-captures — and this module never mentions a grammar's vocabulary. Adding a language is
-a query file and a grammar name; a wrong node type fails when the file is compiled,
+node types that are containers, callables, bound functions, calls and imports, plus
+typed bindings and re-exports — seven captures — and this module never mentions a
+grammar's vocabulary. Adding a language is a query file, a grammar name and its file
+extensions; a wrong node type fails when the file is compiled,
 loudly, rather than matching nothing.
 
 **The receiver is kept, exactly as in Python.** `this.format()` becomes `self.format`
@@ -71,7 +72,7 @@ GRAMMAR = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx",
            "java": "java", "go": "go", "rust": "rust", "csharp": "csharp",
            "ruby": "ruby", "php": "php", "kotlin": "kotlin", "swift": "swift"}
 
-#: Where the per-language query files live. One file, five captures — see the module
+#: Where the per-language query files live. One file, seven captures — see the module
 #: docstring. `tsx` reads the TypeScript file: the grammar differs, the vocabulary does not.
 QUERY_DIR = Path(__file__).parent / "queries"
 CAPTURES = ("container", "callable", "bound", "call", "import", "binding", "reexport")

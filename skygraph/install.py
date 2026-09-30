@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -47,12 +48,29 @@ def launcher() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def installed(script: str) -> str | None:
+    """A console script by absolute path: first from the environment running this
+    command, so `init` never wires a project to some other install of skygraph that
+    happens to be earlier on PATH; then from PATH.
+
+    Absolute because a host started from a dock or a menu does not inherit the shell's
+    PATH. A bare name that works in a terminal fails there, and the host reports it as
+    "connection closed" with nothing to say the command was not found.
+    """
+    beside = Path(sys.executable).parent / script
+    for candidate in (beside, beside.with_suffix(".exe")):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    found = shutil.which(script)
+    return os.path.abspath(found) if found else None
+
+
 def server_command(repo: str, db: str) -> list[str]:
-    """How a host starts the server: the console script if installed, else the
-    launcher by absolute path. Both work from any working directory."""
+    """How a host starts the server: the installed console script, else the checkout's
+    launcher — by absolute path either way, so it works from any working directory."""
     args = ["--repo", repo] + (["--db", db] if db != DEFAULT_DB else [])
-    if shutil.which("skygraph-mcp"):
-        return ["skygraph-mcp"] + args
+    if installed("skygraph-mcp"):
+        return [installed("skygraph-mcp")] + args
     if launcher():
         return [str(launcher())] + args
     raise RuntimeError("neither `skygraph-mcp` on PATH nor a checkout launcher was found; "
@@ -61,12 +79,15 @@ def server_command(repo: str, db: str) -> list[str]:
 
 def index_command(project: Path, repo: str, db: str) -> str:
     """The session-start hook: a delta index, one line of stdout for the agent."""
-    tail = f"{project} --repo {repo}" + (f" --db {db}" if db != DEFAULT_DB else "")
-    if shutil.which("skygraph"):
-        return f"skygraph index {tail} --summary"
+    # A shell runs this, so every path is quoted: a project under "My Projects" would
+    # otherwise index "My" and fail on an argument it does not know.
+    q = shlex.quote
+    tail = f"{q(str(project))} --repo {q(repo)}" + (f" --db {q(db)}" if db != DEFAULT_DB else "")
+    if installed("skygraph"):
+        return f"{q(installed('skygraph'))} index {tail} --summary"
     if launcher():
-        return f"{launcher()} --index {tail}"
-    return f"{sys.executable} -m skygraph index {tail} --summary"
+        return f"{q(str(launcher()))} --index {tail}"
+    return f"{q(sys.executable)} -m skygraph index {tail} --summary"
 
 
 def _merge_json(path: Path, update) -> None:

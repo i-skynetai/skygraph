@@ -227,9 +227,12 @@ if __name__ == "__main__":
 
 
 #: One layout per language, the way its projects are laid out: a repository class, a
-#: service holding it in a typed field, an entry point building the service. The
-#: questions are the same for all seven, and the expected answers are written by hand.
+#: service holding it in a typed field (JavaScript has no types, so a field built by a
+#: constructor), an entry point building the service. The questions are the same for
+#: all eight, and the expected answers are written by hand.
 OTHER_LANGUAGES = {
+    "javascript": ("bench_js", "src/service.js::Service.handle", "src/repo.js::Repo.save",
+              "src/service.js", ["src/service.js", "Service", "Service.constructor", "Service.handle"]),
     "go":    ("bench_go",    "svc/service.go::Service.Handle", "svc/repo.go::Repo.Save",
               "svc/service.go", ["svc/service.go", "Service", "NewService", "Service.Handle"]),
     "rust":  ("bench_rust",  "src/service.rs::Service.handle", "src/repo.rs::Repo.save",
@@ -245,16 +248,17 @@ OTHER_LANGUAGES = {
     "ruby":  ("bench_rb",    "lib/service.rb::Service.handle", "lib/repo.rb::Repo.save",
               "lib/service.rb", ["lib/service.rb", "Service", "Service.initialize", "Service.handle"]),
 }
-ENTRY = {"go": "cmd/main.go::main", "rust": "src/main.rs::main", "csharp": "Program.cs::Program.Main",
+ENTRY = {"javascript": "src/main.js::run", "go": "cmd/main.go::main", "rust": "src/main.rs::main", "csharp": "Program.cs::Program.Main",
          "kotlin": "com/x/Main.kt::main", "swift": "Sources/App.swift::run", "php": "src/main.php::run",
          "ruby": "lib/main.rb::run"}
 
 
-class GoldenQuestionsSevenMoreLanguages(unittest.TestCase):
-    """The claim is eleven languages. Three were proven on real projects; these seven
-    were proven on a one-class snippet. A three-file layout per language, with the
-    same questions as the Python and TypeScript benchmarks, is the least the claim
-    needs — and the place a grammar that stops answering shows up first."""
+class GoldenQuestionsEightMoreLanguages(unittest.TestCase):
+    """The claim is eleven languages. Python, TypeScript and Java have their own
+    benchmarks; these eight were proven on a one-class snippet. A three-file layout per
+    language, with the same questions as the Python and TypeScript benchmarks, is the
+    least the claim needs — and the place a grammar that stops answering shows up first.
+    JavaScript joined last: the README said every language had one, and it did not."""
 
     @classmethod
     def setUpClass(cls):

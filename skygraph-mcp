@@ -43,6 +43,10 @@ def _flag(name: str):
 
 
 if __name__ == "__main__":
+    if "--version" in sys.argv:
+        from skygraph import __version__
+        print(f"skygraph-mcp {__version__}")
+        sys.exit(0)
     db = _flag("--db") or DEFAULT_DB
     repo = _flag("--repo")
     if "--index" in sys.argv:

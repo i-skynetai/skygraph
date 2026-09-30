@@ -5,7 +5,7 @@ import argparse, json, sys
 from .indexer import index
 from .model import DEFAULT_BUDGET, Model
 from .store import IndexNewerThanServer, Store
-from . import mcp
+from . import __version__, mcp
 
 #: One store, not one per project. `list_repos` only means anything if several
 #: repositories share it, and an agent that has to be told which database to open has
@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="skygraph", description="Code intelligence for agents.")
+    ap.add_argument("--version", action="version", version=f"skygraph {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("index", help="walk a repository and build the graph")
@@ -109,6 +110,7 @@ def serve_entry() -> None:
     """
     import argparse
     ap = argparse.ArgumentParser(prog="skygraph-mcp")
+    ap.add_argument("--version", action="version", version=f"skygraph-mcp {__version__}")
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--repo", default=None)
     a = ap.parse_args()

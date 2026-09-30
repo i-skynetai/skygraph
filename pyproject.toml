@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,17 +8,23 @@ version = "0.2.0"
 description = "Code intelligence for coding agents — a graph of your code, served over MCP"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Arup Kumar Sarkar" }]
 keywords = ["mcp", "code-intelligence", "knowledge-graph", "ai-agents", "static-analysis"]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries",
+  "Topic :: Software Development :: Quality Assurance",
 ]
 
 # One runtime dependency: the tree-sitter parsers. They are what give every language
@@ -41,6 +47,9 @@ parsers = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.20,<2"]
 [project.urls]
 Homepage = "https://github.com/arupmmi07/skygraph"
 Source = "https://github.com/arupmmi07/skygraph"
+Documentation = "https://github.com/arupmmi07/skygraph/tree/main/docs"
+Issues = "https://github.com/arupmmi07/skygraph/issues"
+Changelog = "https://github.com/arupmmi07/skygraph/blob/main/CHANGELOG.md"
 
 [project.scripts]
 skygraph = "skygraph.__main__:main"

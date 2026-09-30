@@ -54,8 +54,9 @@ count.
 
 ## What tier 2 cannot do
 
-Tier 2 is line patterns, and a line pattern can see a declaration but not a call. So
-**no tier-2 language produces `CALLS` edges at all**: TypeScript, Java, Go and the rest
+Tier 2 is line patterns — the floor when a parser cannot load — and a line pattern can
+see a declaration but not a call. So **no tier-2 language produces `CALLS` edges at
+all**: TypeScript, Java, Go and the rest
 yield a list of classes and functions, and nothing to traverse. On a large TypeScript
 repository that means `blast_radius`, `related_symbols` and `expand_symbol.called_by`
 come back empty, correctly and unhelpfully.
@@ -65,9 +66,12 @@ silence, because a thin graph and a complete one answer the same way — one jus
 less:
 
 ```
-python       files 207  symbols 3478  calls 20526
-typescript   files 8551 symbols 53    calls 0      <- declarations only, no traversal
+                  patterns only                  with the parsers
+typescript   files 8551  symbols 10672  calls 0   symbols 26236  calls 108276
+java         files 892   symbols 4102   calls 0   symbols 11125  calls 80354
 ```
+
+(A 10,089-file Angular and Java monorepo, indexed both ways.)
 
 The parsers fix it, and `pip install skygraph` brings them: tree-sitter becomes tier 1
 for every language that is not Python, behind the same `Symbol` and `Edge` boundary, so nothing
@@ -232,13 +236,14 @@ expensive tier is paid for once per version of a file.
 ## What is not built
 
 Nothing declared is now unimplemented. The remaining limits are named in the README:
-tier 2 is patterns rather than real parse trees for the ten non-Python languages, and
-`PERSISTS_TO` is a derived lead rather than a fact.
+call resolution is thinnest in Rust, Ruby and around Swift overloads, where "who calls
+this" is a lead rather than a list, and `PERSISTS_TO` is a derived lead rather than a
+fact.
 
 ## The parser tier
 
-One module, `treesitter.py`, and one table of node types per language — the only place
-a grammar's vocabulary appears. Everything downstream sees the same `Symbol` and `Edge`
+One module, `treesitter.py`, and one query file per language under `skygraph/queries/`
+— the only place a grammar's vocabulary appears. Everything downstream sees the same `Symbol` and `Edge`
 it always did.
 
 Three decisions worth recording:

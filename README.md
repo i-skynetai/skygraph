@@ -1,378 +1,322 @@
 # Skygraph
 
 [![tests](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml/badge.svg)](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/arupmmi07/skygraph?include_prereleases)](https://github.com/arupmmi07/skygraph/releases)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![licence](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
 
-
 *A graph of your code, for the agent reading it.*
 
-**Code intelligence for coding agents.** It indexes a repository once into a graph, and
-serves that graph to Claude Code, Codex or any MCP host through fourteen read-only
+**Code intelligence for coding agents.** Skygraph indexes a repository once into a local
+graph and serves it to Claude Code, Codex or any MCP host through fourteen read-only
 tools — so the agent stops rebuilding context out of your folder on every session.
 
-That is the whole argument. An agent with no index pays for rediscovery every time you
-open it: read the tree, open likely files, guess at the rest. Skygraph does the reading
-once, refreshes only what changed, and answers questions the agent would otherwise
-answer by opening files — *where is this declared, what calls it, what breaks if it
-changes* — in a few hundred tokens instead of a few thousand.
+An agent with no index pays for rediscovery every time you open it: read the tree, open
+likely files, guess at the rest. Skygraph does the reading once, refreshes only what
+changed, and answers the questions the agent would otherwise answer by opening files —
+*where is this declared, what calls it, what breaks if it changes* — in a few hundred
+tokens instead of a few thousand. When it is not sure, it says so, and the agent reads
+the file.
 
-Sourcegraph and Graphify solve this for humans reading code. This solves it for an agent
-assembling context: when a search surfaces a caller, the agent needs the callee that
-lives in a *different file*, and that is a graph query, not a text search.
-
-## Where it sits
+- **Local.** One SQLite file in `~/.skygraph/`. No service, no account, no telemetry.
+- **Eleven languages, really parsed.** Python, TypeScript/TSX, JavaScript, Java, Go,
+  Rust, C#, Kotlin, Swift, PHP and Ruby — plus the frameworks, schemas and deploy files
+  around them.
+- **Honest.** Every unresolved call says *why* — `untyped`, `ambiguous` or `external` —
+  and `index_health` shows what was parsed and what was guessed.
 
 ![Skygraph between the agent and the repository: fourteen read-only tools over MCP, five
 ontologies, three extraction tiers, and an index refreshed by delta](docs/images/architecture.svg)
 
+## Quick start
+
+You need Python 3.11 or newer and a git client.
+
+**1. Install.** [pipx](https://pipx.pypa.io) keeps skygraph in its own environment and
+puts the two commands on your PATH:
+
+```bash
+pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+```
+
+Or with pip, inside a virtual environment:
+
+```bash
+pip install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+```
+
+Check it:
+
+```bash
+skygraph --version
+```
+
+**2. Wire a project.** From anywhere:
+
+```bash
+skygraph init /path/to/your/project
+```
+
+That writes the configuration below and indexes the project once. The first index that
+needs a parser downloads the parser bundle once (see [Privacy and
+network](#privacy-and-network)).
+
+| Written | What it does |
+|---|---|
+| `.mcp.json` in the project | tells Claude Code how to start the server, scoped to this repository |
+| `CLAUDE.md`, and `AGENTS.md` if the project has one | a short paragraph telling the agent to use the graph before reading files, and to read the file when the graph says it is unsure |
+| `.claude/settings.json` | a session-start hook that re-indexes only changed files and prints one line into the agent's context (`--no-hook` to skip) |
+| Codex block | printed; `--codex` writes it into `~/.codex/config.toml` |
+
+Running `init` again is safe: everything is merged or replaced, never duplicated. The
+paths it writes are absolute and belong to your machine; a teammate runs `init` on
+theirs.
+
+**3. Restart the agent in the project** and ask it something only the graph answers
+cheaply:
+
+> Use skygraph: where is `PaymentService` declared, and who calls its `refund` method?
+
+In Claude Code the tools appear as `mcp__skygraph__find_symbols` and so on. Run `/mcp`
+to confirm the server is connected.
+
+**Codex.** Run `skygraph init /path/to/your/project --codex`, or paste the printed block
+into `~/.codex/config.toml`, then restart Codex.
+
+**Any other MCP host.** `skygraph-mcp --repo <name>` is a stdio MCP server; point the
+host at it by absolute path (`command -v skygraph-mcp` prints it). [Connecting
+it](docs/connecting.md) has the details.
+
 ## The fourteen tools
 
-Shaped by one question: does this let the agent take one fewer turn, or carry less text,
-than reading the folder would?
+All read-only. Only `read_source` returns code; everything else returns structure —
+names, kinds, line ranges, relations — so the agent can check it has the right symbol
+before paying for its text.
 
-| | |
-|---|---|
-| **Find** | `find_symbols` · `list_repos` · `list_files` · `map_coverage` |
-| **Understand** | `describe_symbol` · `expand_symbol` · `outline_file` · `read_source` · `context_for` |
-| **Traverse** | `related_symbols` · `file_imports` · `blast_radius` |
-| **Trust** | `repo_summary` · `index_health` |
-
-Three rules fall out of that question, and they are what make this different from a
-search box.
-
-**Look before you fetch.** Only `read_source` returns code. Everything else returns
-structure — names, kinds, line ranges, relations. An agent can locate a symbol, see its
-shape, check its callers and decide it is the wrong one, for a few hundred tokens rather
-than a file.
-
-**Answer the whole question in one call.** `context_for`, `expand_symbol` and `related_symbols`
-bundle what would otherwise be four or five round trips. A round trip re-sends the whole
-conversation, so a bundled answer is cheaper than the sum of its parts by a wide margin.
-
-**Say what you do not know.** `index_health` exists because an agent that cannot
-see the gaps in an index will answer over them. An index nine tenths inferred by a
-language model is a different object from one nine tenths parsed, and nothing in the
-rows themselves says which you have.
-
-## Five ontologies
-
-An ontology declares what may exist in the graph. A front end that emits anything else
-raises rather than writing a row nobody agreed to.
-
-| | | Read from |
+| | Tool | Answers |
 |---|---|---|
-| `code_ontology` | what is declared, what calls what, what imports what | Python AST; ten more languages parsed with tree-sitter, pattern-matched if it cannot load |
+| **Find** | `list_repos` | what is indexed, and how big — start here |
+| | `find_symbols` | where a name is declared; an exact name comes back as one row |
+| | `list_files` | the indexed files, optionally under a folder |
+| | `map_coverage` | files and definitions per folder — is this module indexed, and how well |
+| **Understand** | `context_for` | one call to start on a symbol: definition, file outline, imports, callers, callees — under a byte budget |
+| | `describe_symbol` | one symbol's kind, file, line range and tier, without its source |
+| | `expand_symbol` | a symbol with what it contains, calls and is called by; for an endpoint, the trace to its table |
+| | `outline_file` | every declaration in a file with its line range |
+| | `read_source` | the source of one symbol, read live from disk, marked `stale` if the file changed |
+| **Traverse** | `related_symbols` | siblings in the file, callees, callers, importers |
+| | `file_imports` | what a file imports, and what imports it |
+| | `blast_radius` | transitive callers or callees, deepest first |
+| **Trust** | `repo_summary` | counts and root for one repository |
+| | `index_health` | parsed versus inferred, degraded files, which languages have call edges |
+
+## Languages and frameworks
+
+Every language below is parsed, not pattern-matched, and has a three-file fixture with
+the same golden questions in CI. The last column is the share of in-repository calls
+resolved to one declaration on a real codebase; the rest are marked `untyped` or
+`ambiguous` rather than guessed.
+
+| Language | Parser | Measured on | Calls resolved |
+|---|---|---|---|
+| Python | built-in `ast` | a 1,720-file Python service | 65 % |
+| TypeScript, TSX | tree-sitter | a 10,089-file Angular and Java monorepo | 71 % |
+| JavaScript | tree-sitter | the same monorepo's JavaScript files | 42 % |
+| Java | tree-sitter | the same monorepo · square/moshi | 54 % · 74 % |
+| C# | tree-sitter | serilog | 64 % |
+| PHP | tree-sitter | slimphp/Slim | 49 % |
+| Kotlin | tree-sitter | square/moshi | 42 % |
+| Go | tree-sitter | gorilla/mux | 40 % |
+| Swift | tree-sitter | Alamofire | 40 % |
+| Rust | tree-sitter | tokio-rs/bytes | 29 % |
+| Ruby | tree-sitter | sinatra | 24 % |
+
+Rust traits and generics, Ruby's missing types and Swift overloads resolve least. There,
+"who calls this" is a lead, not a list, and the answer says so.
+
+Beyond code, five ontologies declare what else the graph may hold:
+
+| Ontology | What | Read from |
+|---|---|---|
+| `code_ontology` | declarations, calls, imports, inheritance | the eleven languages above |
 | `data_ontology` | entities, fields, keys | SQLAlchemy, Django, SQLModel, JPA, SQL DDL, Prisma |
 | `api_ontology` | endpoints, operations, parameters | FastAPI, Flask, Express, Spring, JAX-RS, OpenAPI in JSON or YAML |
 | `deploy_ontology` | images, deployables, config, pipelines, dependencies | Dockerfile, Compose, Kubernetes, GitHub Actions, GitLab CI, `package.json`, `pom.xml`, `build.gradle`, `requirements`, `pyproject`, `go.mod`, `Cargo.toml` |
 | `link` | the joins between the layers | derived after indexing |
 
-**A file can feed several at once.** A module of SQLAlchemy models is `code_ontology`
-and `data_ontology` both: the class really is a class, and it really is an entity with a
-table. Asking about it returns both, because being told "it's a class" and never
-learning it has a table is usually half the answer you wanted.
-
-```json
-{"name": "models.py::User", "kind": "Class", "ontology": "code_ontology",
- "also_in": [{"ontology": "data_ontology", "kind": "Entity", "summary": "table users"}]}
-```
-
-## What the join buys you
-
-`code_ontology` alone is a better grep. The joins are what a text search cannot fake,
-because they are written down nowhere — nothing in a route handler names a table.
+The joins are what a text search cannot fake, because they are written down nowhere —
+nothing in a route handler names a table:
 
 ```
 POST /users  ──HANDLED_BY──►  create_user  ──PERSISTS_TO──►  User  ──MAPS_TO──►  users
    api_ontology                  code_ontology                 data_ontology            table
 ```
 
-`expand_symbol` on an endpoint returns that whole chain in one call, because an agent
-that has just found an endpoint is about to ask what it writes to.
+`expand_symbol` on an endpoint returns that chain in one call.
 
-**Two of those joins are facts and one is a lead, and they are not allowed to look
-alike.** A route decorator sits on its function in the syntax tree, and
-`__tablename__` states a name outright — those are `native`. That a handler *persists*
-to a model is inferred from a resolved call, so it is `query`, and the trace says
-`derived — the handler calls the model`. An agent that wants only facts can filter;
-one that wants a lead can follow it. What it must not do is confuse them.
+## When the agent should read the file instead
 
-## Declaration or convention — the tier says which
-
-The same distinction runs through the extractors:
-
-```
-m.py::User      table users              tier=native   __tablename__ says so
-d.py::Member    inherits models.Model    tier=query    a base class name is a guess
-```
-
-A class inheriting something called `Model` is probably a Django model and might be
-anything at all. `index_health` reports the split, so an index built mostly from
-conventions is visibly a different object from one built from declarations.
-
-## Built once, refreshed by delta
-
-Every file carries a content hash. A second run reads only what changed. On a real
-271-file repository, cold:
-
-```
-files 271 · symbols 3,470 · edges 25,000+ · 1.8 seconds
-```
-
-and then:
-
-```
-run 2   indexed 0 · unchanged 271
-```
-
-Re-indexing after a day's work costs the few files you touched. An index that re-parsed
-everything on every run would have the same flaw as the agent it is meant to fix, one
-layer down.
-
-## Calls are resolved by scope, then by name
-
-A parser sees `helper()` and can honestly report only the word. Which declaration that
-is takes the whole repository, so resolution happens once, after every file is in.
-
-**Name alone does not survive a real codebase.** On a 271-file repository `run` is
-declared twenty-two times and `get` is called from 1,354 places. Matching on the name
-left 91% of in-repo calls ambiguous. So the search runs narrowest first:
-
-| | Found by |
-|---|---|
-| `self.x()` inside a class | that class, then any class in the same file |
-| `svc.find()` on a field, parameter or local with a declared type, or built by a constructor | that class — in every language that declares types; `x = make()` follows `make`'s declared return type |
-| a name imported through a barrel (`index.ts`, `__init__.py`) | the file that actually declares it, following `RE_EXPORTS` |
-| a call on an interface or base class | placed on the interface — and `expand_symbol` on an implementation lists those callers too, marked `via` the interface, with `overrides` and `implemented_by` alongside |
-| `receiver.x()` where the receiver is an imported module | that module |
-| `receiver.x()` where the receiver is anything else | **nothing — left ambiguous** |
-| a bare `x()` | the same file, then an imported module, then a unique declaration |
-
-```
-resolved 3,612 · ambiguous 3,576 · external 13,404
-how: same-file 2,553 · imported 396 · self 303 · receiver 194 · self-in-file 164
-```
-
-**An unknown receiver is never resolved.** `config.get("a")` is a dictionary in almost
-every file that contains one, and it is not a call to the one class that happens to
-declare a `get`. Resolving it on the name being unique is the same guess this refuses
-everywhere else — and on a real repository it produced a method with 301 callers where
-nine existed.
-
-**An unresolved call says *why*, and the reasons are not interchangeable.**
+The graph narrows what to read; it does not replace reading when it is unsure. Every
+unresolved call carries its reason:
 
 | | |
 |---|---|
 | `resolved` | the callee is known |
-| `untyped` | the receiver is a local, a parameter or a return value, so which declaration it means is unknown — **not** that the callee is absent |
-| `ambiguous` | several same-named functions could be meant |
-| `external` | genuinely not declared in this repository |
+| `untyped` | the receiver is a local, parameter or return value whose type is unknown — the callee exists, which one is unknown |
+| `ambiguous` | several same-named declarations could be meant |
+| `external` | not declared in this repository |
 
-That distinction is the difference between a useful answer and a wrong one. `external`
-is a claim, and it was being made without grounds: both real `store.write(...)` call
-sites in this project were reported *not declared in this repository* while
-`Store.write` sat in the next file. So "who calls this" answered a confident nothing.
+The paragraph `init` writes into `CLAUDE.md` turns that into a rule: if an answer is
+empty, marked `stale`, `untyped` or `ambiguous`, or `index_health` says the file's
+language is not traversable, read the file directly.
 
-**Read `untyped` before trusting a caller list.** A large count means callers are
-missing, not that there are none — which is exactly when a `grep` is the better tool,
-and the index should say so rather than let you assume otherwise.
+## Keeping it current
 
-**What is still ambiguous is left bare.** Narrowing the search must not turn a guess
-into a claim. A missing edge makes an agent look; a wrong edge makes it confident.
+- **Every session.** The hook `init` installs runs a delta index when the agent starts:
+  only files whose content hash changed are read again. On this repository a cold index
+  takes 0.6 s and the next run reads nothing.
+- **By hand.** `skygraph index /path/to/project --repo name` does the same; `--full`
+  re-reads everything.
+- **Changed since indexing.** `read_source` compares the file on disk with the indexed
+  one and marks the answer `stale` rather than pointing at the wrong lines.
+- **After upgrading skygraph,** restart the agent so it starts a server from the new
+  code. An old server that finds a newer index refuses it and says "restart" rather than
+  answering from it.
 
-## The parser tier
+## Privacy and network
 
-A line pattern can see a declaration and cannot see a call. Without a real parser, a
-TypeScript repository indexes as a list of classes with nothing to traverse — and
-`blast_radius`, `related_symbols` and `called_by` come back empty, correctly and
-uselessly. So the parsers come with the install: `pip install skygraph` brings
-tree-sitter, and its grammars download once, about 22–26 MB, the first time a language
-is indexed. Where they cannot load, each file falls to the pattern tier and says why.
+- **What the index holds.** Structure, not text: names, kinds, line ranges, relations
+  and a content hash per file, in `~/.skygraph/index.db`. `read_source` reads source
+  from disk when asked.
+- **What goes over the network.** Two things, and nothing else:
+  1. The parser pack downloads its compiled grammars the first time one is needed —
+     one bundle for your platform, about 22–26 MB, once per pack version, from the
+     pack's own GitHub release — and caches it. Offline, those files fall back to pattern matching and
+     say so.
+  2. The optional model tier, only if you set `SKYGRAPH_MODEL_KEY`, sends files no
+     parser could read to the endpoint you choose. A local endpoint keeps it on your
+     machine. See [the model tier](docs/connecting.md#optionally-let-a-model-read-what-the-parsers-could-not).
+- **What the server can do.** Answer questions. There is no write tool; indexing is a
+  separate command. It speaks MCP over stdio only.
 
-Measured on a real 10,089-file Angular and Java repository, same files both ways:
+## Commands
 
-| | patterns only | with parsers |
-|---|---|---|
-| symbols | 15,418 | **38,007** |
-| edges | 41,415 | **264,442** |
-| resolved calls | 16 | **35,232** |
-| cold index | 19 s | 39 s |
+| Command | Does |
+|---|---|
+| `skygraph init <path>` | wire a project to Claude Code (and Codex with `--codex`), then index it |
+| `skygraph index <path> --repo <name>` | build or refresh the index; `--full` re-reads everything, `--summary` prints one line |
+| `skygraph forget --repo <name>` | drop one repository from the index |
+| `skygraph degraded --repo <name>` | files that were not parsed at their best tier, and why |
+| `skygraph search <text> --repo <name>` | find symbols by name from the terminal |
+| `skygraph neighbours <symbol> --repo <name>` | one hop of calls and imports |
+| `skygraph ontologies` | the five ontologies as JSON |
+| `skygraph-mcp --repo <name>` | the MCP server a host starts |
 
-It is optional because a consumer inherits whatever this depends on, and a parser for
-thirty grammars is worth an install without being worth forcing on everyone. Without
-it nothing breaks; the graph is thinner and says which languages are thin.
+Every command that reads or writes an index takes `--db <file>` to use one other than
+`~/.skygraph/index.db`.
 
-Everything it produces is tier `native` — it is a real parse — and it keeps the
-receiver exactly as the Python front end does, so `this.format()` becomes `self.format`
-and one set of resolution rules covers every language.
+## Troubleshooting
 
-## The optional model tier
+| Symptom | Fix |
+|---|---|
+| The host shows no skygraph tools, or says "connection closed" | Run the server by hand with the command from `.mcp.json` and read its error: `echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \| "$(command -v skygraph-mcp)"` |
+| `list_repos` comes back empty | The server reads a different index. Pass the same `--db` to `init` and the server, or re-run `init`. |
+| A tool answers "written by skygraph schema N … restart" | A server from before an upgrade is still running. Restart the agent. |
+| `index_health` lists a language as not traversable | Its parser did not load — usually the first index ran offline. Run `skygraph index <path> --repo <name> --full` once online. |
+| Answers point at old line numbers | Re-index, or reopen the session so the hook does. `read_source` already marks those answers `stale`. |
 
-Only for files the parsers could not read, only with a key you supply, and never for
-anything a parser handled.
-
-```bash
-export SKYGRAPH_MODEL_KEY=...         # Anthropic or any OpenAI-compatible endpoint
-python3 -m skygraph index /path/to/repo --repo myrepo
-```
-
-```json
-{"model": {"provider": "openai", "model": "gpt-4o-mini", "used": true,
-           "candidates": 2, "attempted": 2, "accepted": 2,
-           "failed": 0, "refused_rows": 2, "over_budget": 0}}
-```
-
-**Nothing it produces is called a fact.** Every row is tier `model`, so `parsed` is
-false and `index_health` counts it apart:
-
-```
-parsed 2 · inferred 3 · share 0.4
-gap: report.erl — no parser could read this; a model read it (gpt-4o-mini);
-                  2 row(s) refused as undeclared
-```
-
-Three things hold it in place.
-
-**The ontology is the authority for a model exactly as for a parser.** A reply naming a
-kind no ontology declares has that row dropped and counted — not the schema widened,
-and not the row admitted because a model sounded sure. An edge from something the same
-reply did not declare is a model describing code it was not shown, and goes the same
-way.
-
-**It is capped and it reports.** A budget of files per run, a cap on how much of one
-file is sent, and counts of attempted, accepted and refused. A failure is never fatal:
-the heuristic answer for that file is already written, so an unreachable endpoint costs
-you a better answer, not the index.
-
-**A second run asks nothing.** The content hash already decides what gets re-read, so
-the most expensive tier is paid for once per version of a file.
-
-It talks to Anthropic or to anything speaking the OpenAI shape — including a local
-Ollama or vLLM, which makes the whole tier free:
+## Uninstall
 
 ```bash
-export SKYGRAPH_MODEL_KEY=unused
-export SKYGRAPH_MODEL_URL=http://localhost:11434/v1/chat/completions
-export SKYGRAPH_MODEL=qwen2.5-coder
+pipx uninstall skygraph
+rm -rf ~/.skygraph
 ```
 
-## The parsing tiers
+In each project, delete the `skygraph` entry from `.mcp.json`, the block between
+`<!-- skygraph:start -->` and `<!-- skygraph:end -->` in `CLAUDE.md` and `AGENTS.md`,
+and the skygraph hook in `.claude/settings.json`; in `~/.codex/config.toml`, the block
+between `# skygraph:start` and `# skygraph:end`. The parser cache lives where this
+prints, before you uninstall:
+
+```bash
+python -c "import tree_sitter_language_pack as p; print(p.cache_dir())"
+```
+
+## How it works
 
 ![The pipeline, the three tiers, and what the core guarantees regardless of
 language](docs/images/pipeline.svg)
 
-## The design
+**One capture vocabulary, interchangeable front ends.** Every front end emits the same
+`Symbol` and `Edge` types; the store, the resolver and the tools know nothing about
+languages. A language is a query file — see [Adding a language](docs/adding-a-language.md).
 
-**One capture vocabulary, three interchangeable front ends.** Every front end emits the
-same `Symbol` and `Edge` types. Everything downstream — the writer, the store, the query
-layer, the scoping — knows nothing about languages. Adding a language means adding a
-front end, not touching the core.
-
-| Tier | How | Today |
+| Tier | How | Used for |
 |---|---|---|
-| **1 · native** | a real parse, full fidelity | Python via `ast`; everything else via tree-sitter, when installed |
-| **2 · query** | line patterns — declarations only, never calls | the same languages, when tree-sitter is not installed |
-| **3 · model** | optional, needs a key | anything the first two could not read |
-| **4 · heuristic** | the floor, marks everything a guess | when there is no key |
+| **native** | a real parse | Python via `ast`; the other ten via tree-sitter |
+| **query** | line patterns — declarations only, never calls | a language whose parser could not load |
+| **model** | optional, needs a key | files no parser could read |
+| **heuristic** | the floor, every row a guess | the rest |
 
-**Nothing is ever lost silently.** A construct a tier cannot handle degrades to the tier
-below and records *why*, on the file row. `skygraph degraded` lists every one.
+**Nothing is lost silently.** A file a tier cannot handle falls to the tier below and
+records why on its row; `skygraph degraded` lists them. A graph that is quietly
+incomplete gives confident wrong answers.
 
-A graph that is quietly incomplete produces confident wrong answers. That is worse than
-a graph that says loudly it could not read a file, so the engine refuses to be quiet.
+**Calls are resolved by scope, then by name.** On the Python service above, `get` is
+declared 57 times, so a name alone decides nothing. The resolver works narrowest first:
 
-**The schema is the authority.** `skygraph/schema.py` declares the kinds and relations
-that may exist. A front end emitting anything else raises at construction — the process
-stops rather than writing a node nobody declared.
+| Call | Found by |
+|---|---|
+| `self.x()` inside a class | that class, then another class in the same file |
+| `svc.find()` on a field, parameter or local with a declared type, or built by a constructor or a typed factory | that type, in every language that declares types |
+| a name imported through a barrel (`index.ts`, `__init__.py`) | the file that actually declares it |
+| a call on an interface or base class | the interface; `expand_symbol` on an implementation lists those callers too, marked `via` |
+| `module.x()` on an imported module or Go package | that module |
+| a bare `x()` | `this` in a Java-family class that declares it, then the same file, an import, then the one declaration of that name in the language |
+| `receiver.x()` on anything else | **nothing — left `untyped`** |
 
-**Scope lives on the row, not on the query.** Every symbol and edge carries its repo and
-branch. A query that forgets to filter returns nothing rather than another repository's
-code: the failure mode is empty, not wrong.
+An unknown receiver is never resolved on the name being unique: `config.get("a")` is a
+dictionary, not a call to the one class that happens to declare `get`.
 
-## Use
+**The parsers are what give calls.** The same 10,089-file monorepo, indexed both ways
+on a laptop:
 
-```bash
-pip install /path/to/skygraph           # the parsers for every language come with it
-skygraph init /path/to/your/project     # .mcp.json, CLAUDE.md, a session-start hook, first index
-```
+| | patterns only | with parsers |
+|---|---|---|
+| symbols | 16,076 | **38,700** |
+| edges | 41,524 | **284,728** |
+| resolved calls | 14 | **38,773** |
+| cold index | 22 s | 54 s |
 
-Then restart Claude Code in the project. That is the whole install; [Connecting
-it](docs/connecting.md) has the long way and the Codex block.
+**The schema is the authority.** `skygraph/schema.py` and the five ontologies declare the
+kinds and relations that may exist; a front end — or a model — emitting anything else is
+refused, not admitted. **Scope lives on the row:** every symbol and edge carries its
+repository and branch, so a query that forgets to filter returns nothing rather than
+another project's code.
 
-From a checkout, without installing — Python is parsed; the other languages are read by
-pattern until the parsers are installed beside the launcher (see [Connecting
-it](docs/connecting.md)):
-
-```bash
-git clone https://github.com/arupmmi07/skygraph.git
-cd skygraph
-
-python3 -m skygraph index /path/to/a/repo --repo myrepo
-python3 -m skygraph search Alpha --repo myrepo
-python3 -m skygraph neighbours 'src/a.py::Alpha.run' --repo myrepo
-python3 -m skygraph degraded --repo myrepo
-```
-
-Indexing itself:
-
-```json
-{ "files": 8, "symbols": 61, "edges": 383, "languages": 1,
-  "tiers": { "native": 8 }, "degraded": 0 }
-```
-
-## As an MCP server
-
-```bash
-./skygraph-mcp
-```
-
-Fourteen tools, all read-only. There is no write tool of any kind — indexing is a
-separate, deliberate act, and an agent that could re-index could also quietly change
-what the next question sees.
-
-It negotiates the protocol version rather than asserting one, answers `ping`, and
-**never replies to a notification** — a JSON-RPC message with no `id` is not waiting for
-an answer, and a host is entitled to drop a server that sends one anyway.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"tools/call",
- "params":{"name":"expand_symbol",
-           "arguments":{"qualified_name":"src/a.py::Alpha.run"}}}
-```
+[Architecture](docs/architecture.md) has the full design and the reasons behind it.
 
 ## Documentation
 
 | | |
 |---|---|
-| [Connecting it](docs/connecting.md) | Wiring it into Claude Code, Codex or any MCP host |
-| [Architecture](docs/architecture.md) | The pipeline, and where a language plugs in |
-| [Adding a language](docs/adding-a-language.md) | Tier 2 in about twenty lines |
+| [Connecting it](docs/connecting.md) | Claude Code, Codex or any MCP host, by hand; running from a checkout; the model tier |
+| [Architecture](docs/architecture.md) | The pipeline, the resolver, and why each rule exists |
+| [Adding a language](docs/adding-a-language.md) | A query file, a grammar name and its file extensions |
 | [Contributing](CONTRIBUTING.md) | Running the tests, and what a change needs |
-
+| [Changelog](CHANGELOG.md) | What changed in each release |
+| [Security](SECURITY.md) | What the index holds, and how to report a vulnerability |
 
 ## Status
 
-Python 3.11+; one dependency, the tree-sitter parsers. **265 tests**, run by CI on 3.11, 3.12 and 3.13.
+Version 0.2.0, beta. **267 tests**, including a golden-question benchmark with
+hand-checked answers and byte ceilings, run by CI on Python 3.11 to 3.14 — once without
+the parsers, for the fallback, and once as installed. Developed on macOS; CI runs on
+Linux.
 
-All five ontologies have extractors, and the optional model tier is wired in.
-
-Every claimed language has a three-file fixture — a repository class, a service holding
-it in a typed field, an entry point — and the same golden questions in CI: what is in
-this file, what does the service call, who calls the repository, does the entry point
-reach the service. Python, TypeScript and Java are additionally measured on real
-repositories; the other seven were also indexed from one real open-source project each
-(gorilla/mux, tokio-rs/bytes, serilog, square/moshi, Alamofire, slimphp/Slim, sinatra):
-every file parsed, no ambiguous edge invented, and a sample of typed-receiver
-resolutions in each confirmed against the source.
-
-`index_health` reports per language whether it produces call edges at all, so a thin
-graph is visible rather than merely quiet.
-
-YAML is read by a deliberately small reader rather than a dependency: it understands the
-shapes manifests take, marks everything it produces tier 2, and raises rather than
-half-reading a document that uses anchors, merge keys, tags or block scalars.
+Not yet built: cross-repository resolution, a watcher (indexing is a deliberate act, or
+the session hook), and serving one index to a team over HTTP.
 
 ## Licence
 
-Apache 2.0.
+[Apache 2.0](LICENSE).

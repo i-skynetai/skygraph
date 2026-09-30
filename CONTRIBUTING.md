@@ -1,21 +1,39 @@
 # Contributing
 
+## Setting up
+
+```bash
+git clone https://github.com/arupmmi07/skygraph.git
+cd skygraph
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+Python 3.11 or newer. The editable install brings the tree-sitter parsers, the one
+dependency.
+
 ## Running the tests
 
 ```bash
-python3 -m unittest discover -s tests -t .                 # the default install
-.venv/bin/python -m unittest discover -s tests -t .        # and with the parsers
+.venv/bin/python -m unittest discover -s tests -t .        # as installed, parsers live
+python3 -m unittest discover -s tests -t .                 # bare: the fallback
 ```
 
-Run it **both ways**. The parser tier only executes when tree-sitter is installed, and
-a skipped test is not evidence — CI runs the suite twice for the same reason.
+Run it **both ways**. The parser tier only executes when tree-sitter is present, and a
+skipped test is not evidence; the bare run is what a machine gets when the parsers
+cannot load. CI runs both, on Python 3.11 to 3.14, plus the lint below.
 
-265 cases, including a golden-question benchmark. The suite needs nothing installed — without the parsers their tests skip, which is why it runs twice. That is the same
-command CI runs, so a green run here is the run that matters.
+```bash
+ruff check --select E9,F skygraph tests
+```
+
+The suite is the golden-question benchmark plus the unit cases, and it needs nothing
+but the standard library to run. A green run of those commands is the run that matters.
 
 ## The benchmark
 
-`tests/test_benchmark.py` indexes two small repositories under `tests/fixtures/` and asks
+`tests/test_benchmark.py` indexes small repositories under `tests/fixtures/` — one per
+language — and asks
 the questions a coder asks — where is X, what is in this file, who calls X, which table
 does this endpoint write — with answers known from the source, not derived from grep.
 Each answer must be right and must fit a byte ceiling. A gap the graph cannot answer yet
@@ -35,9 +53,10 @@ ceiling and the answer get re-checked then. Add a question here before adding a 
 
 ## Adding a language
 
-A language is a query file — `skygraph/queries/<language>.scm`, five captures — and a
-grammar name; see [docs/adding-a-language.md](docs/adding-a-language.md). Add the
-file; do not touch the interpreter, the writer, the store or the query layer. If a
+A language is a query file — `skygraph/queries/<language>.scm`, seven captures — a
+grammar name, its file extensions and a benchmark fixture; see
+[docs/adding-a-language.md](docs/adding-a-language.md). Do not touch the interpreter,
+the writer, the store or the query layer. If a
 change to the core seems necessary to support one language, that is the thing to
 discuss first, because it is usually a sign the capture vocabulary is wrong rather than
 too small.
@@ -57,3 +76,18 @@ too small.
 
 Match the file you are editing. The code explains its own reasoning in docstrings; keep
 that habit — the *why* is the part that survives.
+
+## Releasing
+
+1. Set the version in `pyproject.toml` and `skygraph/__init__.py`, and give it a
+   section in `CHANGELOG.md` headed `## X.Y.Z — YYYY-MM-DD`.
+2. Commit, tag and push:
+
+   ```bash
+   git tag -a vX.Y.Z -m "X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+
+3. The release workflow runs the suite, checks the tag matches the package version,
+   builds the wheel and source archive, and opens a **draft** GitHub release with them
+   and the changelog section as notes. Read it, then publish it.

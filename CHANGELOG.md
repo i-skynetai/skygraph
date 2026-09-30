@@ -2,10 +2,22 @@
 
 ## 0.2.0 — 2026-09-29
 
-The trust release: the graph stops answering confidently over a gap. The tag was
-first cut on 2026-09-27 and moved here before anything was published; the second
-list is what that first cut held.
+The first public release — the trust release: the graph stops answering confidently
+over a gap, and says what it cannot see.
 
+- Ready to install from GitHub: `pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"`.
+  The README now leads with install, a quick start, the fourteen tools, the languages
+  with their measured call resolution, privacy and network use, troubleshooting and
+  uninstall. A code of conduct joins the contributor guide.
+- `skygraph --version` and `skygraph-mcp --version`.
+- `skygraph init` writes every command by absolute path, taken from the environment
+  that ran it, and quotes paths in the session hook: a host started from a dock has
+  no shell PATH, and a project under "My Projects" was split in two.
+- JavaScript has its own three-file benchmark fixture; all eleven languages now answer
+  the same golden questions in CI.
+- Pushing a `v*` tag builds the wheel and source archive and opens a draft GitHub
+  release with this changelog's section as notes. CI covers Python 3.11 to 3.14, and
+  the source archive carries the tests and fixtures. Licence metadata is SPDX.
 - Typed receivers: a field, parameter or local with a declared type (or built by a
   constructor) types the calls on it, in every language that declares types; a local
   built by a factory follows the factory's declared return type. Java's resolved share
@@ -59,7 +71,7 @@ list is what that first cut held.
   Ruby `require_relative` is an import; PHP namespaces and PSR-4 root folders resolve;
   a Go package is a scope like a Java package.
 
-### In the first cut, 2026-09-27
+### Earlier in 0.2.0
 
 - `read_source` compares the file's digest with the indexed one and never claims an
   exact range for a changed file; the server reopens its database when the file is
