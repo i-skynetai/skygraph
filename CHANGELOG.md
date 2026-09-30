@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-29
+
+The trust release: the graph stops answering confidently over a gap. The tag was
+first cut on 2026-09-27 and moved here before anything was published; the second
+list is what that first cut held.
 
 - Typed receivers: a field, parameter or local with a declared type (or built by a
   constructor) types the calls on it, in every language that declares types; a local
@@ -55,9 +59,7 @@
   Ruby `require_relative` is an import; PHP namespaces and PSR-4 root folders resolve;
   a Go package is a scope like a Java package.
 
-## 0.2.0 — 2026-09-27
-
-The trust release: the graph stops answering confidently over a gap.
+### In the first cut, 2026-09-27
 
 - `read_source` compares the file's digest with the indexed one and never claims an
   exact range for a changed file; the server reopens its database when the file is
