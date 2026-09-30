@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" width="960" height="430" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/>
+    </marker>
+  </defs>
+  <rect width="960" height="430" fill="#ffffff"/>
+  <text x="20" y="22" font-size="13" fill="#6b7280">WHAT CHANGED THE FILES</text>
+  <text x="340" y="22" font-size="13" fill="#6b7280">ONE REFRESH AT A TIME</text>
+  <text x="660" y="22" font-size="13" fill="#6b7280">WHAT THE AGENT SEES</text>
+
+  <g font-size="15" fill="#111827">
+    <rect x="20" y="36" width="260" height="54" rx="8" fill="#ecfdf5" stroke="#10b981"/>
+    <text x="34" y="59">Session starts</text>
+    <text x="34" y="78" font-size="12" fill="#047857">SessionStart hook · works today</text>
+
+    <rect x="20" y="112" width="260" height="54" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <text x="34" y="135">Claude Code edits a file</text>
+    <text x="34" y="154" font-size="12" fill="#1d4ed8">PostToolUse hook · SG-010</text>
+
+    <rect x="20" y="188" width="260" height="54" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <text x="34" y="211">Codex edits a file</text>
+    <text x="34" y="230" font-size="12" fill="#1d4ed8">Codex hook · SG-015</text>
+
+    <rect x="20" y="264" width="260" height="54" rx="8" fill="#eff6ff" stroke="#3b82f6"/>
+    <text x="34" y="287">git checkout · pull · rebase</text>
+    <text x="34" y="306" font-size="12" fill="#1d4ed8">git hooks, any remote · SG-011</text>
+
+    <rect x="20" y="340" width="260" height="54" rx="8" fill="#f9fafb" stroke="#9ca3af" stroke-dasharray="5 4"/>
+    <text x="34" y="363">Anything else saves a file</text>
+    <text x="34" y="382" font-size="12" fill="#4b5563">skygraph watch, opt-in · SG-016</text>
+
+    <rect x="340" y="146" width="260" height="146" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="356" y="176" font-size="17" font-weight="600">skygraph index</text>
+    <text x="356" y="200" font-size="13" fill="#374151">--paths · --changed-since</text>
+    <text x="356" y="228" font-size="13" fill="#374151">re-reads changed files only</text>
+    <text x="356" y="246" font-size="12" fill="#854d0e">SG-012</text>
+    <text x="356" y="270" font-size="13" fill="#374151">one writer, waits for the last</text>
+    <text x="356" y="286" font-size="12" fill="#854d0e">SG-003</text>
+
+    <rect x="660" y="96" width="280" height="60" rx="8" fill="#f5f3ff" stroke="#8b5cf6"/>
+    <text x="676" y="121">index.db</text>
+    <text x="676" y="141" font-size="12" fill="#6d28d9">~/.skygraph · branch and commit · SG-013</text>
+
+    <rect x="660" y="190" width="280" height="60" rx="8" fill="#f5f3ff" stroke="#8b5cf6"/>
+    <text x="676" y="215">skygraph-mcp</text>
+    <text x="676" y="235" font-size="12" fill="#6d28d9">reopens · marks stale rows · SG-014</text>
+
+    <rect x="660" y="284" width="280" height="60" rx="8" fill="#f5f3ff" stroke="#8b5cf6"/>
+    <text x="676" y="309">Claude Code · Codex</text>
+    <text x="676" y="329" font-size="12" fill="#6d28d9">the next question sees the change</text>
+  </g>
+
+  <g stroke="#4b5563" stroke-width="1.5" fill="none" marker-end="url(#arrow)">
+    <path d="M 280 63 C 310 63 310 190 338 200"/>
+    <path d="M 280 139 C 310 139 310 205 338 210"/>
+    <path d="M 280 215 L 338 219"/>
+    <path d="M 280 291 C 310 291 310 232 338 228"/>
+    <path d="M 280 367 C 314 367 314 244 338 238"/>
+    <path d="M 600 190 C 630 190 630 126 658 126"/>
+    <path d="M 800 156 L 800 188"/>
+    <path d="M 800 250 L 800 282"/>
+  </g>
+</svg>

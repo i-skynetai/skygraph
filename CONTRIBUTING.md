@@ -1,5 +1,15 @@
 # Contributing
 
+## Picking a feature
+
+[ROADMAP.md](ROADMAP.md) lists every planned feature with an ID, a status and an owner,
+and it is the source of truth for who is working on what. Take a `Ready` row — *good
+first issue* ones are small and self-contained — claim it with the *Claim a feature*
+issue template, and set the row to `In progress` with your handle and the date. Your
+pull request moves it to `In review`; the merge makes it `Done`. The full rules, and the
+[design-note template](docs/features/TEMPLATE.md) for large features, are in the
+roadmap.
+
 ## Setting up
 
 ```bash

@@ -177,6 +177,9 @@ language is not traversable, read the file directly.
   takes 0.6 s and the next run reads nothing.
 - **By hand.** `skygraph index /path/to/project --repo name` does the same; `--full`
   re-reads everything.
+- **Not yet automatic:** edits the agent makes during a session, and `git checkout` or
+  `pull`, are picked up at the next session start or by hand. Refreshing on every edit
+  and git operation is next — see [Keeping the index fresh](docs/design/index-refresh.md).
 - **Changed since indexing.** `read_source` compares the file on disk with the indexed
   one and marks the answer `stale` rather than pointing at the wrong lines.
 - **After upgrading skygraph,** restart the agent so it starts a server from the new
@@ -303,6 +306,8 @@ another project's code.
 | [Connecting it](docs/connecting.md) | Claude Code, Codex or any MCP host, by hand; running from a checkout; the model tier |
 | [Architecture](docs/architecture.md) | The pipeline, the resolver, and why each rule exists |
 | [Adding a language](docs/adding-a-language.md) | A query file, a grammar name and its file extensions |
+| [Roadmap](ROADMAP.md) | Every planned feature, its status and owner — and how to pick one |
+| [Keeping the index fresh](docs/design/index-refresh.md) | The design for refreshing after edits and git operations |
 | [Contributing](CONTRIBUTING.md) | Running the tests, and what a change needs |
 | [Changelog](CHANGELOG.md) | What changed in each release |
 | [Security](SECURITY.md) | What the index holds, and how to report a vulnerability |
@@ -314,8 +319,9 @@ hand-checked answers and byte ceilings, run by CI on Python 3.11 to 3.14 — onc
 the parsers, for the fallback, and once as installed. Developed on macOS; CI runs on
 Linux.
 
-Not yet built: cross-repository resolution, a watcher (indexing is a deliberate act, or
-the session hook), and serving one index to a team over HTTP.
+What comes next — refreshing on every edit and git operation, deeper OpenAPI, SQL and
+ORM support, design diagrams, more languages — is in the [roadmap](ROADMAP.md), with a
+status and an owner per feature. Contributions welcome: pick a `Ready` one.
 
 ## Licence
 
