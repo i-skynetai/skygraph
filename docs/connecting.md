@@ -43,11 +43,13 @@ indexed 3 · unchanged 1,847 · removed 1
 There is no watcher and no daemon. Indexing is a deliberate act, and a background
 process quietly rewriting what the next question sees is not something to add lightly.
 
-### Optionally, install the parsers
+### The parsers, when running from a checkout
 
-Without them only Python produces call edges, so `blast_radius`, `related_symbols` and
-`called_by` are empty for every other language. With them, every language is really
-parsed.
+`pip install skygraph` brings them. A checkout run without installing does not have
+them, and without them only Python produces call edges, so `blast_radius`,
+`related_symbols` and `called_by` are empty for every other language. With them, every
+language is really parsed. Either way the grammars download once, on first use, from
+the pack's GitHub release (about 22–26 MB), into the user cache folder.
 
 ```bash
 cd /path/to/skygraph

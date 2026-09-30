@@ -1,11 +1,10 @@
-"""Tier 1 for languages other than Python — a real parse, when tree-sitter is present.
+"""Tier 1 for languages other than Python — a real parse, with tree-sitter.
 
-**Why this is optional and not a dependency.** Everything else in skygraph is the
-standard library, and a consumer that installs it inherits whatever it depends on. A
-parser for thirty languages is worth an install; it is not worth making everyone take
-one. So: if `tree_sitter` and `tree_sitter_language_pack` import, this tier runs. If
-they do not, the file falls to the pattern tier exactly as before, and `index_health`
-reports which languages are read by a pattern rather than a parser.
+**A dependency, with a floor under it.** `pip install skygraph` brings `tree_sitter`
+and `tree_sitter_language_pack`; the pack downloads its compiled grammars once, on first
+use. Everything here still degrades rather than fails: when the modules do not import,
+or a grammar will not load, the file falls to the pattern tier, its row says why, and
+`index_health` reports which languages are read by a pattern rather than a parser.
 
 **What it buys is calls.** The pattern tier can see a declaration and cannot see a call,
 because a call is not a line — so a repository of TypeScript used to index as a list of
@@ -35,6 +34,38 @@ from .schema import Edge, FileResult, Symbol
 _AVAILABLE: bool | None = None
 _PARSERS: dict[str, object] = {}
 
+#: A grammar that would not load, and why. Tried once per language per process: the pack
+#: downloads its grammars on first use, and a machine with no network would otherwise
+#: try again — and wait again — for every file of that language.
+_UNLOADABLE: dict[str, str] = {}
+
+
+class GrammarUnavailable(RuntimeError):
+    """A grammar the pack could not load: not downloadable, or not built for this
+    platform. The file falls to the pattern tier and its row carries this message."""
+
+
+def _load_parser(name: str):
+    from tree_sitter_language_pack import get_parser
+    return get_parser(name)
+
+
+def _load_language(name: str):
+    from tree_sitter_language_pack import get_language
+    return get_language(name)
+
+
+def _grammar(language: str, load):
+    if language in _UNLOADABLE:
+        raise GrammarUnavailable(_UNLOADABLE[language])
+    try:
+        return load(GRAMMAR[language])
+    except Exception as exc:                                      # noqa: BLE001
+        detail = " ".join(str(exc).split())[:160]
+        _UNLOADABLE[language] = (f"the {language} grammar did not load: "
+                                 f"{type(exc).__name__}{': ' + detail if detail else ''}")
+        raise GrammarUnavailable(_UNLOADABLE[language]) from exc
+
 #: `tree_sitter_language_pack` names some grammars differently from our language names.
 GRAMMAR = {"javascript": "javascript", "typescript": "typescript", "tsx": "tsx",
            "java": "java", "go": "go", "rust": "rust", "csharp": "csharp",
@@ -55,8 +86,7 @@ def _query(language: str):
     """The compiled query for a language. Compiled once; a bad node type raises here."""
     if language not in _QUERIES:
         from tree_sitter import Query
-        from tree_sitter_language_pack import get_language
-        _QUERIES[language] = Query(get_language(GRAMMAR[language]),
+        _QUERIES[language] = Query(_grammar(language, _load_language),
                                    query_file(language).read_text(encoding="utf-8"))
     return _QUERIES[language]
 
@@ -386,8 +416,7 @@ def claims(language: str) -> bool:
 
 def _parser(language: str):
     if language not in _PARSERS:
-        from tree_sitter_language_pack import get_parser
-        _PARSERS[language] = get_parser(GRAMMAR[language])
+        _PARSERS[language] = _grammar(language, _load_parser)
     return _PARSERS[language]
 
 

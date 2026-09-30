@@ -7,6 +7,11 @@
   built by a factory follows the factory's declared return type. Java's resolved share
   of in-repository calls on a real monorepo: 17 % → 47 %; Python 53 % → 59 %.
   Symbols carry `returns`; the index schema is version 7 and rebuilds.
+- The tree-sitter parsers are a dependency, not the `[parsers]` extra (kept as an alias):
+  an install that lacked them indexed every language but Python without calls. The pack
+  downloads its grammars once, on first use. A grammar that will not load is tried once
+  per language, not once per file, and each file's row says why it fell to the pattern
+  tier.
 - A missing tool argument is named once, not wrapped in itself.
 - An index written by a newer skygraph is refused, not rebuilt. A server still running
   older code keeps the handshake and the tool list, answers every tool call with the two

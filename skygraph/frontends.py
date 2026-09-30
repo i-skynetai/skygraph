@@ -159,8 +159,9 @@ def parse(path: str, source: str) -> FileResult:
             result = treesitter.parse(path, source, lang)
         except Exception as exc:                                  # noqa: BLE001
             result = _query(path, source, lang)
-            result.degraded = (f"tree-sitter failed ({type(exc).__name__}); "
-                               "fell to the pattern tier")
+            reason = (str(exc) if isinstance(exc, treesitter.GrammarUnavailable)
+                      else type(exc).__name__)
+            result.degraded = f"tree-sitter failed ({reason}); fell to the pattern tier"
     elif lang in QUERY_LANGUAGES:
         result = _query(path, source, lang)
     else:

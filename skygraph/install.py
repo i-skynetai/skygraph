@@ -202,6 +202,8 @@ def init(project: str | os.PathLike, repo: str | None = None, db: str = DEFAULT_
                 if not ok and lang in QUERY_LANGUAGES]
         if thin:
             print(f"read by pattern, no call edges: {', '.join(thin)} — declarations only; "
-                  "install the parsers (`pip install 'skygraph[parsers]'`) for calls", file=out)
+                  "the tree-sitter parsers did not load. They come with `pip install "
+                  "skygraph` (the grammars download once, on first use); a checkout run "
+                  "without installing lacks them", file=out)
     print("next: restart Claude Code in this project and ask it to run list_repos", file=out)
     return written

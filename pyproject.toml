@@ -21,18 +21,22 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 
-# No runtime dependencies, deliberately. The parsers are the standard library, the
-# YAML reader is ours, and the model tier talks over urllib. Anything added here is
-# added to every install of every consumer.
-dependencies = []
+# One runtime dependency: the tree-sitter parsers. They are what give every language
+# other than Python its calls; without them a TypeScript or Java repository indexes as
+# declarations with nothing to traverse, and an install that quietly lacks them is the
+# common case, not the careful one. Everything else stays standard library.
+#
+# The pack fetches its compiled grammars from its own GitHub release on first use —
+# about 22–26 MB, once per pack version — and caches them in the user cache folder.
+# When they cannot load (no network on first use, no build for the platform) each file
+# falls to the pattern tier, says so, and `index_health` reports the language as read by
+# a pattern. The floor is the version the query files were written against; the cap is
+# the next major, whose grammars may rename the node types those files name.
+dependencies = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.20,<2"]
 
 [project.optional-dependencies]
-# A real parse for every language that is not Python. Optional because a consumer
-# inherits whatever this depends on, and a parser for thirty grammars is worth an
-# install without being worth forcing on everyone. Without it those languages are read
-# by line patterns, which find declarations and cannot find calls — and `index_health`
-# says so per language rather than answering thinly and looking healthy.
-parsers = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
+# The parsers used to be this extra. Kept so an install line written for it still works.
+parsers = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.20,<2"]
 
 [project.urls]
 Homepage = "https://github.com/arupmmi07/skygraph"

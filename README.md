@@ -62,7 +62,7 @@ raises rather than writing a row nobody agreed to.
 
 | | | Read from |
 |---|---|---|
-| `code_ontology` | what is declared, what calls what, what imports what | Python AST; ten more languages parsed with `[parsers]`, pattern-matched without |
+| `code_ontology` | what is declared, what calls what, what imports what | Python AST; ten more languages parsed with tree-sitter, pattern-matched if it cannot load |
 | `data_ontology` | entities, fields, keys | SQLAlchemy, Django, SQLModel, JPA, SQL DDL, Prisma |
 | `api_ontology` | endpoints, operations, parameters | FastAPI, Flask, Express, Spring, JAX-RS, OpenAPI in JSON or YAML |
 | `deploy_ontology` | images, deployables, config, pipelines, dependencies | Dockerfile, Compose, Kubernetes, GitHub Actions, GitLab CI, `package.json`, `pom.xml`, `build.gradle`, `requirements`, `pyproject`, `go.mod`, `Cargo.toml` |
@@ -181,16 +181,14 @@ and the index should say so rather than let you assume otherwise.
 **What is still ambiguous is left bare.** Narrowing the search must not turn a guess
 into a claim. A missing edge makes an agent look; a wrong edge makes it confident.
 
-## The optional parser tier
+## The parser tier
 
 A line pattern can see a declaration and cannot see a call. Without a real parser, a
 TypeScript repository indexes as a list of classes with nothing to traverse — and
 `blast_radius`, `related_symbols` and `called_by` come back empty, correctly and
-uselessly.
-
-```bash
-pip install 'skygraph[parsers]'
-```
+uselessly. So the parsers come with the install: `pip install skygraph` brings
+tree-sitter, and its grammars download once, about 22–26 MB, the first time a language
+is indexed. Where they cannot load, each file falls to the pattern tier and says why.
 
 Measured on a real 10,089-file Angular and Java repository, same files both ways:
 
@@ -295,14 +293,16 @@ code: the failure mode is empty, not wrong.
 ## Use
 
 ```bash
-pip install /path/to/skygraph           # or `pip install 'skygraph[parsers]'` for every language
+pip install /path/to/skygraph           # the parsers for every language come with it
 skygraph init /path/to/your/project     # .mcp.json, CLAUDE.md, a session-start hook, first index
 ```
 
 Then restart Claude Code in the project. That is the whole install; [Connecting
 it](docs/connecting.md) has the long way and the Codex block.
 
-From a checkout, without installing:
+From a checkout, without installing — Python is parsed; the other languages are read by
+pattern until the parsers are installed beside the launcher (see [Connecting
+it](docs/connecting.md)):
 
 ```bash
 git clone https://github.com/arupmmi07/skygraph.git
@@ -353,7 +353,7 @@ an answer, and a host is entitled to drop a server that sends one anyway.
 
 ## Status
 
-Python 3.11+, standard library only. **263 tests**, run by CI on 3.11, 3.12 and 3.13.
+Python 3.11+; one dependency, the tree-sitter parsers. **265 tests**, run by CI on 3.11, 3.12 and 3.13.
 
 All five ontologies have extractors, and the optional model tier is wired in.
 

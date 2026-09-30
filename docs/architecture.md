@@ -69,8 +69,8 @@ python       files 207  symbols 3478  calls 20526
 typescript   files 8551 symbols 53    calls 0      <- declarations only, no traversal
 ```
 
-`pip install 'skygraph[parsers]'` fixes it: tree-sitter becomes tier 1 for every
-language that is not Python, behind the same `Symbol` and `Edge` boundary, so nothing
+The parsers fix it, and `pip install skygraph` brings them: tree-sitter becomes tier 1
+for every language that is not Python, behind the same `Symbol` and `Edge` boundary, so nothing
 downstream changes. See **The parser tier** below.
 
 ## Also not built

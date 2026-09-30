@@ -10,7 +10,7 @@ python3 -m unittest discover -s tests -t .                 # the default install
 Run it **both ways**. The parser tier only executes when tree-sitter is installed, and
 a skipped test is not evidence — CI runs the suite twice for the same reason.
 
-263 cases, including a golden-question benchmark; the core is standard library only — no install step, nothing to pin. That is the same
+265 cases, including a golden-question benchmark. The suite needs nothing installed — without the parsers their tests skip, which is why it runs twice. That is the same
 command CI runs, so a green run here is the run that matters.
 
 ## The benchmark
@@ -28,9 +28,10 @@ ceiling and the answer get re-checked then. Add a question here before adding a 
   of an error.
 - **A recorded reason for anything the change makes impossible.** A rule without a
   reason gets relaxed by the next person who finds it inconvenient.
-- **No new dependency.** The parser tiers are standard library. A tier that needs a
-  third-party grammar belongs behind the same `Symbol`/`Edge` boundary as everything
-  else, not in the core.
+- **No new dependency.** The tree-sitter parsers are the one there is, because without
+  them nothing but Python has calls. Anything else is standard library, and a tier that
+  needs a third-party grammar belongs behind the same `Symbol`/`Edge` boundary as
+  everything else, not in the core.
 
 ## Adding a language
 

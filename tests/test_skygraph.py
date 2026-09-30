@@ -1213,6 +1213,52 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
                         "the server destroyed a newer index")
 
 
+class TheParsersComeWithTheInstall(unittest.TestCase):
+    """An install that quietly lacked them indexed every language but Python without a
+    single call edge — correct, empty, and indistinguishable from a quiet codebase."""
+
+    def test_they_are_a_dependency_and_the_old_extra_still_resolves(self):
+        import tomllib
+        meta = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        needed = " ".join(meta["dependencies"])
+        self.assertIn("tree-sitter>=", needed)
+        self.assertIn("tree-sitter-language-pack>=", needed)
+        self.assertIn("parsers", meta["optional-dependencies"],
+                      "an install line written for the old extra would warn and fail over")
+
+
+class AGrammarThatWillNotLoadIsTriedOnce(unittest.TestCase):
+    """The pack downloads grammars on first use. Offline, a grammar that fails once fails
+    for every file — and trying again per file is a network timeout per file."""
+
+    def test_the_second_file_does_not_try_again_and_both_say_why(self):
+        if not treesitter.available():
+            self.skipTest("needs the parsers")
+        tried = []
+
+        def unreachable(name):
+            tried.append(name)
+            raise OSError("network is unreachable")
+
+        saved = (treesitter._load_parser, treesitter._PARSERS.pop("go", None),
+                 treesitter._UNLOADABLE.pop("go", None))
+        treesitter._load_parser = unreachable
+        try:
+            first = frontends.parse("a/one.go", "package a\n\nfunc One() { Two() }\n")
+            second = frontends.parse("a/two.go", "package a\n\nfunc Two() {}\n")
+        finally:
+            treesitter._load_parser = saved[0]
+            treesitter._UNLOADABLE.pop("go", None)
+            if saved[1] is not None:
+                treesitter._PARSERS["go"] = saved[1]
+        self.assertEqual(tried, ["go"], "the grammar was fetched again for the second file")
+        for result in (first, second):
+            self.assertIn("go grammar did not load", result.degraded or "")
+            self.assertIn("network is unreachable", result.degraded or "")
+        self.assertTrue(any(sym.name.endswith("::One") for sym in first.symbols),
+                        "the pattern tier should still find the declaration")
+
+
 class ANameIsNeverMatchedAcrossALanguage(_Indexed):
     """Found on a real 10,000-file repository, in a sample of ten.
 

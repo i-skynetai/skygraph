@@ -8,9 +8,10 @@ on:
 
 jobs:
   test:
-    # The suite is standard library only, so this is the whole build: no
-    # install step, no lockfile, nothing to drift. If a version of Python
-    # the README claims support for stops working, this is where it shows.
+    # The suite needs nothing installed to run, so it runs twice: bare, which is
+    # the fallback when the parsers cannot load, and after `pip install .`, which
+    # is the default install. If a version of Python the README claims support
+    # for stops working, this is where it shows.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,7 +27,7 @@ jobs:
           python -m pip install --quiet ruff
           ruff check --select E9,F skygraph tests
 
-      - name: Run the suite — standard library only, which is the default install
+      - name: Run the suite without the parsers — the fallback when they cannot load
         run: python -m unittest discover -s tests -t . -v
 
       - name: Build the package — the query files must ship as package data
@@ -35,11 +36,11 @@ jobs:
           python -m build --wheel --outdir /tmp/dist
           python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/dist/*.whl')[0]); names=z.namelist(); assert any(n.endswith('queries/typescript.scm') for n in names), names"
 
-      # And again with the optional parsers, because the tier that reads every
-      # language other than Python only runs when they are present. Skipped tests
-      # are not evidence, so both configurations are exercised.
-      - name: Install the optional parsers
-        run: python -m pip install --quiet '.[parsers]'
+      # And again as installed, because the tier that reads every language other
+      # than Python only runs when the parsers are present. Skipped tests are not
+      # evidence, so both configurations are exercised.
+      - name: Install the package — the parsers come with it
+        run: python -m pip install --quiet .
 
       - name: Run the suite again, with the parser tier live
         run: python -m unittest discover -s tests -t . -v
