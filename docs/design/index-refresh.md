@@ -65,17 +65,18 @@ search-and-replace — are caught by the next edit hook, the next session, or `w
 `index_health` says how many files changed since the last index (SG-014), so a stale
 index is visible rather than trusted.
 
-## Branches (SG-013, needs a decision)
+## Branches (SG-013, decided)
 
 Every row already carries a branch, but the indexer never asks git — everything is
-filed under `main`. Two models:
+filed under `main`.
 
-- **One index that mirrors the working tree** (recommended). A checkout re-reads only
-  the files that differ between the two commits, and the index records the branch and
-  commit it reflects. It costs nothing extra, and the agent works on what is checked
-  out.
-- **One copy per branch.** Switching back is instant, but every branch costs a full
-  index — 286 MB for the 10,000-file repository above.
+**Decided: one index mirrors the working tree.** A checkout re-reads only the files that
+differ between the two commits, and the index records the branch and commit it
+reflects. It costs nothing extra, and the agent works on what is checked out.
+
+*Rejected: one copy per branch.* Switching back would be instant, but every branch would
+cost a full index — 286 MB for the 10,000-file repository above — for branches the
+agent is not looking at.
 
 ## What the agent sees
 

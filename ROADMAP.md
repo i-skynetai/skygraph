@@ -55,7 +55,7 @@ something new, open an issue with the *Propose a feature*; it gets an ID when ac
 | SG-010 | [Refresh after the agent edits a file](#sg-010) | freshness | P1 | S | Ready | |
 | SG-011 | [Refresh after git checkout, pull, merge and rebase](#sg-011) | freshness | P1 | M | Ready | |
 | SG-012 | [Targeted refresh of named files](#sg-012) | freshness | P1 | L | Ready | |
-| SG-013 | [Branch-aware index](#sg-013) | freshness | P1 | M | Needs decision | |
+| SG-013 | [Branch-aware index](#sg-013) | freshness | P1 | M | Ready | |
 | SG-014 | [Freshness shown in every answer](#sg-014) | freshness | P1 | M | Ready | |
 | SG-015 | [Refresh for Codex and other hosts](#sg-015) | freshness | P1 | M | Needs decision | |
 | SG-016 | [`skygraph watch`](#sg-016) | freshness | P2 | M | Proposed | |
@@ -168,10 +168,12 @@ b.ts` and `--changed-since <git ref>` re-read only those files and re-resolve on
 calls that can have changed, in under a second on that repository.
 
 <a id="sg-013"></a>**SG-013 — Branch-aware index.** Every index row carries a branch, but
-the indexer never asks git — everything is filed under `main`. *Decision needed:* keep
-one index that mirrors the working tree and records the branch and commit it reflects,
-or keep one copy per branch. *Done when:* `index_health` reports the branch and commit;
-the chosen model is documented and tested.
+the indexer never asks git — everything is filed under `main`. *Decided (2026-09-30):*
+one index mirrors the working tree — a checkout re-reads only the files that differ —
+and records the branch and commit it reflects; no copy per branch. *Done when:*
+`index_health` reports the branch and commit the index reflects; after `git checkout`
+of another branch and a refresh, answers match that branch's files and the reported
+branch changes; a repository that is not a git checkout still indexes, with no branch.
 
 <a id="sg-014"></a>**SG-014 — Freshness shown in every answer.** Only `read_source`
 notices that a file changed since it was indexed. *Done when:* any tool's row from a
