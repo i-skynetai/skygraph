@@ -40,13 +40,17 @@ something new, open an issue with the *Propose a feature*; it gets an ID when ac
 
 ## Features
 
-### 0.2.1 — correctness
+### 0.2.0 — first public release: what must ship
+
+The release bar: a fresh clone reaches a working demo with one command, the tests pass
+with one command, and nothing the README claims is broken. These rows block the release.
 
 | ID | Feature | Area | P | Size | Status | Owner |
 |---|---|---|---|---|---|---|
 | SG-001 | [YAML with block scalars and anchors](#sg-001) | deploy | P0 | M | Ready | |
-| SG-002 | [Deterministic call resolution](#sg-002) | resolver | P0 | S | Ready | |
+| SG-002 | [Deterministic call resolution](#sg-002) | resolver | P0 | S | In progress | @arupmmi07, 2026-10-01 |
 | SG-003 | [Safe concurrent indexing](#sg-003) | store | P0 | S | Ready | |
+| SG-004 | [`skygraph demo`: see it work in one command](#sg-004) | experience | P0 | S | Ready | |
 
 ### 0.3.0 — always fresh
 
@@ -143,6 +147,15 @@ uses no write-ahead log and indexing takes no lock. *Done when:* the store opens
 mode; a second `skygraph index` on the same repository waits for, or merges into, the
 running one instead of failing; a server keeps answering while an index is written.
 *Starts in:* `Store.__init__`, `indexer.index`.
+
+<a id="sg-004"></a>**SG-004 — `skygraph demo`: see it work in one command.** Today, seeing
+skygraph answer anything needs your own project and an agent wired to it. Someone
+evaluating it should not need either. *Done when:* `skygraph demo` indexes a small
+sample project shipped inside the package — Python and TypeScript, with an endpoint, an
+entity and a call across files — into a throwaway index, asks the questions an agent
+asks (where is it, what calls it, what breaks, which table an endpoint writes), and
+prints each answer beside what reading the files would have cost; it needs no network
+beyond the one-time parser download, and it leaves nothing behind.
 
 ### Always fresh
 
