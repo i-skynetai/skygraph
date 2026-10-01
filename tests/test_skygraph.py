@@ -810,6 +810,42 @@ class ABarrelForwardsWhatItExports(_Indexed):
         self.assertIn(("apps/a.ts::go", "libs/x/src/lib/bar.ts::helper"), calls)
         self.assertIn(("libs/x/src/index.ts", "libs/x/src/lib/foo.ts"), self.rel("RE_EXPORTS"))
 
+    def test_a_large_barrel_resolves_every_name_and_the_same_way_every_run(self):
+        """SG-002. A shared library's `index.ts` re-exported more than 64 files; the walk
+        stopped at 64, in set order, so which names resolved depended on Python's hash
+        seed — 38,728 or 38,779 calls on the same unchanged monorepo."""
+        if not treesitter.available():
+            self.skipTest("tree-sitter is not installed")
+        import subprocess
+        os.makedirs(os.path.join(self.tmp, "lib"), exist_ok=True)
+        self.write("lib/index.ts", "".join(f"export * from './m{i}';\n" for i in range(90)))
+        for i in range(90):
+            self.write(f"lib/m{i}.ts", f"export function f{i}() {{ return {i}; }}\n")
+        # The same names declared elsewhere too, as in a real monorepo: without the
+        # barrel walk nothing else can decide which one `app.ts` means.
+        self.write("other.ts", "export function f3() {}\nexport function f71() {}\n"
+                               "export function f89() {}\n")
+        self.write("app.ts", "import { f3, f71, f89 } from './lib';\n"
+                             "export function main() { f3(); f71(); f89(); }\n")
+        dumps = []
+        for seed in ("1", "2", "3"):
+            db = os.path.join(tempfile.mkdtemp(), "g.db")
+            script = ("import sys, json; sys.path.insert(0, sys.argv[3]);"
+                      "from skygraph.indexer import index; from skygraph.store import Store;"
+                      "index(sys.argv[1], repo='t', db=sys.argv[2]);"
+                      "rows = Store(sys.argv[2]).db.execute(\"SELECT src, dst, resolution FROM edges "
+                      "WHERE rel='CALLS' ORDER BY 1, 2\").fetchall();"
+                      "print(json.dumps([list(r) for r in rows]))")
+            out = subprocess.run([sys.executable, "-c", script, self.tmp, db, str(REPO)],
+                                 capture_output=True, text=True, timeout=120,
+                                 env={**os.environ, "PYTHONHASHSEED": seed})
+            self.assertEqual(out.returncode, 0, out.stderr[-500:])
+            dumps.append(out.stdout)
+        self.assertEqual(len(set(dumps)), 1, "the edges depend on the hash seed")
+        calls = {(src, dst) for src, dst, _how in json.loads(dumps[0])}
+        for i in (3, 71, 89):
+            self.assertIn(("app.ts::main", f"lib/m{i}.ts::f{i}"), calls)
+
     def test_an_imported_name_types_a_receiver_even_when_aliased(self):
         if not treesitter.available():
             self.skipTest("tree-sitter is not installed")

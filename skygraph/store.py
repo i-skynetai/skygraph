@@ -624,23 +624,37 @@ class Store:
         def declares(file: str, name: str) -> bool:
             return name in classes_in.get(file, {}) or name in plain_file.get(file, {})
 
-        def through_barrels(start: str, name: str) -> str | None:
-            """The file that declares `name`, reached from `start` by re-exports only."""
-            seen, queue = {start}, [start]
-            while queue:
-                file = queue.pop(0)
-                if declares(file, name):
-                    return file
-                for nxt in forwards.get(file, ()):
-                    if nxt not in seen and len(seen) < 64:
-                        seen.add(nxt); queue.append(nxt)
-            return None
+        #: barrel -> every name it makes importable -> the file that declares it.
+        exported: dict[str, dict[str, str]] = {}
+
+        def exports_of(barrel: str) -> dict[str, str]:
+            """What `barrel` makes importable, reached by re-exports only.
+
+            Breadth first, in path order, so the nearest declaration wins and the answer
+            never depends on set order. It used to stop after 64 files, visited in set
+            order: a shared library's `index.ts` re-exports more than that, so which
+            names resolved changed with Python's hash seed (SG-002). Computed once per
+            barrel, because one barrel serves thousands of imports.
+            """
+            if barrel not in exported:
+                found: dict[str, str] = {}
+                seen, queue = {barrel}, [barrel]
+                while queue:
+                    file = queue.pop(0)
+                    for name in (*classes_in.get(file, {}), *plain_file.get(file, {})):
+                        found.setdefault(name, file)
+                    for nxt in sorted(forwards.get(file, ())):
+                        if nxt not in seen:
+                            seen.add(nxt)
+                            queue.append(nxt)
+                exported[barrel] = found
+            return exported[barrel]
 
         for file, file_aliases in named.items():
             for alias, (target, outcome) in list(file_aliases.items()):
                 wanted = declared_as(file, alias)
                 if target and not declares(target, wanted) and target in forwards:
-                    found = through_barrels(target, wanted)
+                    found = exports_of(target).get(wanted)
                     if found:
                         file_aliases[alias] = (found, outcome)
 

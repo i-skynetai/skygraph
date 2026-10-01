@@ -9,6 +9,10 @@ over a gap, and says what it cannot see.
   The README now leads with install, a quick start, the fourteen tools, the languages
   with their measured call resolution, privacy and network use, troubleshooting and
   uninstall. A code of conduct joins the contributor guide.
+- Call resolution is the same on every run (SG-002). A barrel was walked only 64 files
+  deep, in set order, so a shared library re-exporting more than that resolved
+  differently with each Python hash seed: 38,728 to 38,779 calls on one unchanged
+  monorepo. Walked completely and in path order, it is 38,909 every time.
 - `skygraph --version` and `skygraph-mcp --version`.
 - `skygraph init` writes every command by absolute path, taken from the environment
   that ran it, and quotes paths in the session hook: a host started from a dock has
