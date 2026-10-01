@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="300" fill="#ffffff"/>
+  <text x="24" y="38" font-size="20" font-weight="700" fill="#0f172a">One index run</text>
+
+  <g font-size="13" fill="#334155">
+    <rect x="24" y="62" width="172" height="160" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="40" y="90" font-size="16" font-weight="700" fill="#0f172a">1 · Walk</text>
+    <text x="40" y="116">every file in the</text>
+    <text x="40" y="134">repository; skip one</text>
+    <text x="40" y="152">whose content has not</text>
+    <text x="40" y="170">changed since last time</text>
+
+    <rect x="220" y="62" width="172" height="160" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+    <text x="236" y="90" font-size="16" font-weight="700" fill="#7c2d12">2 · Parse</text>
+    <text x="236" y="116">Python with its own</text>
+    <text x="236" y="134">parser; 10 languages</text>
+    <text x="236" y="152">with tree-sitter;</text>
+    <text x="236" y="170">patterns if it cannot</text>
+    <text x="236" y="188">load</text>
+
+    <rect x="416" y="62" width="172" height="160" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="432" y="90" font-size="16" font-weight="700" fill="#713f12">3 · Extract</text>
+    <text x="432" y="116">endpoints, tables,</text>
+    <text x="432" y="134">pipelines, settings</text>
+    <text x="432" y="152">from code, specs</text>
+    <text x="432" y="170">and config files</text>
+
+    <rect x="612" y="62" width="172" height="160" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+    <text x="628" y="90" font-size="16" font-weight="700" fill="#064e3b">4 · Resolve</text>
+    <text x="628" y="116">which declaration</text>
+    <text x="628" y="134">each call means;</text>
+    <text x="628" y="152">join endpoint to</text>
+    <text x="628" y="170">handler to table</text>
+
+    <rect x="808" y="62" width="168" height="160" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="824" y="90" font-size="16" font-weight="700" fill="#1e3a8a">5 · Store</text>
+    <text x="824" y="116">one SQLite file in</text>
+    <text x="824" y="134">~/.skygraph, one</text>
+    <text x="824" y="152">writer at a time;</text>
+    <text x="824" y="170">the tools read it</text>
+  </g>
+
+  <g stroke="#475569" stroke-width="2" fill="none" marker-end="url(#a)">
+    <path d="M196 142 L216 142"/>
+    <path d="M392 142 L412 142"/>
+    <path d="M588 142 L608 142"/>
+    <path d="M784 142 L804 142"/>
+  </g>
+  <text x="500" y="268" font-size="14" fill="#475569" text-anchor="middle">Anything a step cannot read is marked degraded, with the reason — never silently left out.</text>
+</svg>

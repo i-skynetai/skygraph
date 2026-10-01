@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 849" width="760" height="849">
+<rect width="760" height="849" rx="10" fill="#0f172a"/>
+<circle cx="22" cy="20" r="6" fill="#ef4444"/><circle cx="42" cy="20" r="6" fill="#f59e0b"/><circle cx="62" cy="20" r="6" fill="#22c55e"/>
+<text x="380" y="25" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">terminal — real output of skygraph demo</text>
+<g font-family="Menlo, Monaco, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" xml:space="preserve">
+<text x="22" y="52" fill="#86efac">$ skygraph demo</text>
+<text x="22" y="71" fill="#e2e8f0">skygraph demo — a sample shop: a Python API, an order service, stock, two</text>
+<text x="22" y="90" fill="#e2e8f0">tables, a TypeScript client, a Dockerfile and a CI file.</text>
+<text x="22" y="109" fill="#e2e8f0"></text>
+<text x="22" y="128" fill="#e2e8f0">Indexed 10 files in 29 ms: 38 symbols, 11 calls resolved, 0 files degraded.</text>
+<text x="22" y="147" fill="#e2e8f0">These are the questions a coding agent asks instead of opening files:</text>
+<text x="22" y="166" fill="#e2e8f0"></text>
+<text x="22" y="185" fill="#fde68a">1. Where is OrderService declared?</text>
+<text x="22" y="204" fill="#94a3b8">   find_symbols · 331 bytes back to the agent</text>
+<text x="22" y="223" fill="#e2e8f0">   shop/orders.py:6–17   class OrderService — &quot;Places orders and keeps stock in step.&quot;</text>
+<text x="22" y="242" fill="#e2e8f0"></text>
+<text x="22" y="261" fill="#fde68a">2. What does POST /orders write to?</text>
+<text x="22" y="280" fill="#94a3b8">   expand_symbol · 473 bytes back to the agent</text>
+<text x="22" y="299" fill="#e2e8f0">   → create_order (shop/api.py)</text>
+<text x="22" y="318" fill="#e2e8f0">   → Order (shop/models.py) → table orders</text>
+<text x="22" y="337" fill="#e2e8f0">     (derived — the handler calls the model)</text>
+<text x="22" y="356" fill="#e2e8f0"></text>
+<text x="22" y="375" fill="#fde68a">3. Who calls Inventory.reserve?</text>
+<text x="22" y="394" fill="#94a3b8">   expand_symbol · 591 bytes back to the agent</text>
+<text x="22" y="413" fill="#e2e8f0">   ← OrderService.place (shop/orders.py)</text>
+<text x="22" y="432" fill="#e2e8f0"></text>
+<text x="22" y="451" fill="#fde68a">4. What is affected if Inventory.reserve changes?</text>
+<text x="22" y="470" fill="#94a3b8">   blast_radius · 288 bytes back to the agent</text>
+<text x="22" y="489" fill="#e2e8f0">   ← OrderService.place (shop/orders.py)</text>
+<text x="22" y="508" fill="#e2e8f0">     ← create_order (shop/api.py)</text>
+<text x="22" y="527" fill="#e2e8f0"></text>
+<text x="22" y="546" fill="#fde68a">5. What does the TypeScript checkout call?</text>
+<text x="22" y="565" fill="#94a3b8">   expand_symbol · 402 bytes back to the agent</text>
+<text x="22" y="584" fill="#e2e8f0">   → placeOrder (web/src/api.ts)</text>
+<text x="22" y="603" fill="#e2e8f0"></text>
+<text x="22" y="622" fill="#fde68a">6. Can the agent trust this index?</text>
+<text x="22" y="641" fill="#94a3b8">   index_health · 2,259 bytes back to the agent</text>
+<text x="22" y="660" fill="#e2e8f0">   parsed, with calls: python, typescript</text>
+<text x="22" y="679" fill="#e2e8f0">   read for what they declare: yaml, dockerfile</text>
+<text x="22" y="698" fill="#e2e8f0">   files degraded: 0</text>
+<text x="22" y="717" fill="#e2e8f0"></text>
+<text x="22" y="736" fill="#e2e8f0">Each answer is what Claude Code or Codex receives through skygraph&#x27;s fourteen</text>
+<text x="22" y="755" fill="#e2e8f0">tools, instead of opening the files. The sample and its index were temporary and</text>
+<text x="22" y="774" fill="#e2e8f0">are gone.</text>
+<text x="22" y="793" fill="#e2e8f0"></text>
+<text x="22" y="812" fill="#e2e8f0">Try it on your own code:  skygraph init /path/to/your/project</text>
+</g></svg>

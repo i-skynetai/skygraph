@@ -6,9 +6,13 @@ The first public release — the trust release: the graph stops answering confid
 over a gap, and says what it cannot see.
 
 - Ready to install from GitHub: `pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"`.
-  The README now leads with install, a quick start, the fourteen tools, the languages
-  with their measured call resolution, privacy and network use, troubleshooting and
-  uninstall. A code of conduct joins the contributor guide.
+  The README follows the shared documentation standard: what it is, a picture, the
+  problem, the words you need, a sixty-second demo with its real output pictured, three
+  steps, one run explained, what you get, what it is not — under 900 words. The detail
+  moved to `docs/getting-started.md` (install, commands, privacy, troubleshooting,
+  uninstall) and `docs/reference.md` (the tools, languages measured, what answers mean,
+  limits). Pictures are drawn as SVG and embedded as PNG; two stale ones were replaced.
+  A code of conduct joins the contributor guide.
 - Call resolution is the same on every run (SG-002). A barrel was walked only 64 files
   deep, in set order, so a shared library re-exporting more than that resolved
   differently with each Python hash seed: 38,728 to 38,779 calls on one unchanged

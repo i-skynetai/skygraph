@@ -87,6 +87,16 @@ too small.
 Match the file you are editing. The code explains its own reasoning in docstrings; keep
 that habit — the *why* is the part that survives.
 
+## Documentation
+
+The README follows one order — what it is, a picture, the problem, the words you need,
+see it work in sixty seconds, numbered steps, what happens on a run, what you get, what
+it is not, status, read more, licence — and stays under 900 words; detail belongs in
+`docs/`. Pictures are drawn as SVG, kept in `docs/images/`, and embedded as the PNG
+rendered from them, because many previewers cannot show SVG; look at the PNG before
+committing it. Every number on a page is current and every claim is tested or a roadmap
+row. No private, employer or client names anywhere.
+
 ## Releasing
 
 1. Set the version in `pyproject.toml` and `skygraph/__init__.py`, and give it a

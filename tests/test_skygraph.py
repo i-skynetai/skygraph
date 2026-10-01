@@ -1856,6 +1856,8 @@ class CiFilesAreReadNotDropped(_Indexed):
     refused it, and the file was recorded as parsed with nothing in it."""
 
     def test_this_repositorys_workflows_yield_their_pipelines_and_stages(self):
+        if not (REPO / ".github" / "workflows").is_dir():
+            self.skipTest("this copy has no .github folder")
         out = index(REPO / ".github", repo="self", db=self.db)
         self.assertEqual(out["degraded"], 0)
         stages = {r["name"] for r in Store(self.db).db.execute(

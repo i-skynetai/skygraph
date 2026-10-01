@@ -8,7 +8,7 @@
 ```
 
 
-![The pipeline end to end, the three tiers, and what the core guarantees regardless of language](images/pipeline.svg)
+![One index run: walk, parse, extract, resolve, store](images/run.png)
 
 ## Stages
 
@@ -28,6 +28,34 @@ and is not a query-time concern.
 `branch`, with indexes on the scoped lookups.
 
 **MCP.** Fourteen read-only tools over stdio JSON-RPC.
+
+## Resolving calls
+
+Calls are resolved by scope, then by name. On the Python service above, `get` is
+declared 57 times, so a name alone decides nothing. The resolver works narrowest first:
+
+| Call | Found by |
+|---|---|
+| `self.x()` inside a class | that class, then another class in the same file |
+| `svc.find()` on a field, parameter or local with a declared type, or built by a constructor or a typed factory | that type, in every language that declares types |
+| a name imported through a barrel (`index.ts`, `__init__.py`) | the file that actually declares it |
+| a call on an interface or base class | the interface; `expand_symbol` on an implementation lists those callers too, marked `via` |
+| `module.x()` on an imported module or Go package | that module |
+| a bare `x()` | `this` in a Java-family class that declares it, then the same file, an import, then the one declaration of that name in the language |
+| `receiver.x()` on anything else | **nothing — left `untyped`** |
+
+An unknown receiver is never resolved on the name being unique: `config.get("a")` is a
+dictionary, not a call to the one class that happens to declare `get`.
+
+**The parsers are what give calls.** The same 10,089-file monorepo, indexed both ways
+on a laptop:
+
+| | patterns only | with parsers |
+|---|---|---|
+| symbols | 16,166 | **38,790** |
+| edges | 41,628 | **284,832** |
+| resolved calls | 14 | **38,909** |
+| cold index | 14 s | 27 s |
 
 ## Naming
 
@@ -267,3 +295,11 @@ taking the index down with it.
 Arrow functions bound to a name — `const build = () => {...}` — are declarations too,
 which matters because modern TypeScript writes most of its code that way and a
 `function` pattern sees none of it.
+
+## Diagram sources
+
+The pictures are hand-written SVG in `docs/images/`, each with the PNG rendered from it
+beside it (`python3 ../check-docs.py --render <svg>` from the project folder): `run.svg`
+here, `overview.svg` and `demo.svg` in the README, `index-refresh.svg` in
+[Keeping the index fresh](design/index-refresh.md). `demo.svg` is generated from the real
+output of `skygraph demo`. There is no Mermaid source.

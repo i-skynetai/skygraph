@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 360" width="1000" height="360" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="360" fill="#ffffff"/>
+
+  <rect x="24" y="70" width="270" height="200" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="44" y="104" font-size="20" font-weight="700" fill="#0f172a">Your repository</text>
+  <text x="44" y="140" font-size="15" fill="#334155">code in 11 languages</text>
+  <text x="44" y="168" font-size="15" fill="#334155">API specs, schemas, ORM models</text>
+  <text x="44" y="196" font-size="15" fill="#334155">Dockerfiles, CI, manifests</text>
+  <text x="44" y="240" font-size="13" fill="#64748b">read once, then only what changed</text>
+
+  <rect x="365" y="40" width="300" height="260" rx="12" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <text x="387" y="76" font-size="22" font-weight="700" fill="#064e3b">skygraph</text>
+  <text x="387" y="112" font-size="15" font-weight="600" fill="#065f46">1 · Index</text>
+  <text x="387" y="133" font-size="13.5" fill="#334155">parse every file, find what calls what</text>
+  <text x="387" y="166" font-size="15" font-weight="600" fill="#065f46">2 · Graph</text>
+  <text x="387" y="187" font-size="13.5" fill="#334155">symbols, calls, endpoints, tables,</text>
+  <text x="387" y="205" font-size="13.5" fill="#334155">pipelines — in SQLite, on your machine</text>
+  <text x="387" y="238" font-size="15" font-weight="600" fill="#065f46">3 · Answer</text>
+  <text x="387" y="259" font-size="13.5" fill="#334155">14 read-only tools over MCP</text>
+
+  <rect x="736" y="70" width="240" height="200" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="756" y="104" font-size="20" font-weight="700" fill="#1e3a8a">Claude Code · Codex</text>
+  <text x="756" y="140" font-size="15" fill="#334155">asks: where is it?</text>
+  <text x="756" y="166" font-size="15" fill="#334155">who calls it? what breaks?</text>
+  <text x="756" y="204" font-size="15" fill="#334155">gets: a short answer,</text>
+  <text x="756" y="230" font-size="15" fill="#334155">not the files</text>
+
+  <g stroke="#475569" stroke-width="2" fill="none">
+    <path d="M294 170 L361 170" marker-end="url(#a)"/>
+    <path d="M669 150 L732 150" marker-end="url(#a)"/>
+    <path d="M732 196 L669 196" marker-end="url(#a)"/>
+  </g>
+  <text x="682" y="140" font-size="12" fill="#475569">answers</text>
+  <text x="680" y="216" font-size="12" fill="#475569">questions</text>
+
+  <text x="500" y="336" font-size="14" fill="#475569" text-anchor="middle">When skygraph is not sure, the answer says so — and the agent reads the file.</text>
+</svg>

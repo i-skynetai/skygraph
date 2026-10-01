@@ -22,7 +22,7 @@ Between those moments `read_source` notices a changed file and marks its answer
 
 ![Five triggers feed one refresh command, which writes the index one run at a time; the
 server reopens it and marks stale rows, and the agent's next question sees the
-change](../images/index-refresh.svg)
+change](../images/index-refresh.png)
 
 **Every trigger runs the same command,** `skygraph index`, told which files changed when
 the trigger knows (`--paths`) or which commit to compare with (`--changed-since`). There
