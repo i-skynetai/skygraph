@@ -70,6 +70,9 @@ NOT_SOURCE = {
     ".zip", ".gz", ".tar", ".whl", ".jar", ".so", ".dylib", ".dll", ".exe",
     ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3", ".wav",
     ".pyc", ".class", ".o", ".a", ".bin", ".db", ".sqlite",
+    # SQLite's sidecar files — an index kept inside the tree it indexes must not
+    # index its own write-ahead log.
+    ".db-wal", ".db-shm", ".db-journal", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal",
     ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".rtf",
     ".jsonl", ".ndjson", ".parquet", ".avro", ".pickle", ".pkl", ".npy",
     ".html", ".htm", ".xhtml",                 # usually generated; never declarations

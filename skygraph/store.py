@@ -17,7 +17,10 @@ repository every time, and an index that re-parses every run does the same thing
 layer down.
 """
 from __future__ import annotations
+import contextlib
 import json
+import os
+import time
 import posixpath
 import re
 import sqlite3
@@ -283,6 +286,56 @@ def _path_aliases(root: str | None) -> list[tuple[str, list[str]]]:
     return []
 
 
+@contextlib.contextmanager
+def writer_lock(db: str | Path, wait: float = 600.0):
+    """One writer at a time for one index (SG-003).
+
+    A session hook, an edit hook and a git hook can all refresh at once. Without this,
+    two overlapping runs each re-read most of the same files and interleaved their
+    writes. With it, the second waits for the first and then finds little or nothing
+    left to do. Readers are never held up: the store is in WAL mode, so a server keeps
+    answering while an index is written.
+    """
+    path = Path(db).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".lock")
+    with open(lock, "a+b") as handle:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                _lock(handle)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"another skygraph index has held {lock} for "
+                                       f"{wait:.0f} s; try again when it finishes") from None
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            _unlock(handle)
+
+
+try:                                                     # POSIX
+    import fcntl
+
+    def _lock(handle) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+except ImportError:                                      # Windows
+    import msvcrt
+
+    def _lock(handle) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock(handle) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 class IndexNewerThanServer(RuntimeError):
     """The index was written by a newer skygraph than the one opening it.
 
@@ -307,7 +360,21 @@ class Store:
     def __init__(self, path: str | Path = "code-index.db") -> None:
         self.path = str(Path(path).expanduser())
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path)
+        if not Path(self.path).exists():
+            # A write-ahead log without its database belongs to a deleted index — one a
+            # running server may still hold open. Left in place, it is read as part of
+            # the new database and the open fails with a disk I/O error.
+            for stale in (self.path + "-wal", self.path + "-shm"):
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(stale)
+        # Wait rather than fail when another process holds a write lock for a moment.
+        self.db = sqlite3.connect(self.path, timeout=30)
+        self.db.execute("PRAGMA busy_timeout = 30000")
+        try:
+            # Persistent per file: readers no longer wait while an index commits.
+            self.db.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            pass        # another connection holds it right now; the next open switches it
         self.db.row_factory = sqlite3.Row
         self.rebuilt = self._reset_if_stale()
         self.db.executescript(DDL)

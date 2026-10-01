@@ -13,6 +13,12 @@ over a gap, and says what it cannot see.
   deep, in set order, so a shared library re-exporting more than that resolved
   differently with each Python hash seed: 38,728 to 38,779 calls on one unchanged
   monorepo. Walked completely and in path order, it is 38,909 every time.
+- Refreshes that overlap are safe (SG-003). One index takes one writer at a time: a
+  second run waits for the first and then reads only what is still out of date —
+  two overlapping runs used to re-read the same files and interleave their writes.
+  The store uses SQLite's write-ahead log, so a server keeps answering while an
+  index is written; its sidecar files are never indexed, and ones left behind by a
+  deleted index are cleared instead of failing the next open.
 - `skygraph --version` and `skygraph-mcp --version`.
 - `skygraph init` writes every command by absolute path, taken from the environment
   that ran it, and quotes paths in the session hook: a host started from a dock has

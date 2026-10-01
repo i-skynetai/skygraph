@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from . import frontends
 from .schema import FileResult
-from .store import DEFAULT_DB, Store
+from .store import DEFAULT_DB, Store, writer_lock
 
 #: Directories that hold generated output rather than source. A coverage report is
 #: 3,500 HTML files that index as "degraded" and answer nothing.
@@ -36,7 +36,16 @@ def index(root: str | Path, repo: str | None = None, branch: str = "main",
     `model` is an optional tier-3 fallback for files no parser could read. It is asked
     only about those, only up to its budget, and everything it returns is marked as its
     own — see `model.py`.
+
+    One run at a time per index: a second run waits for the first, then reads only
+    what is still out of date (see `writer_lock`).
     """
+    with writer_lock(db):
+        return _index(root, repo, branch, db, full, model)
+
+
+def _index(root: str | Path, repo: str | None, branch: str, db: str, full: bool,
+           model) -> dict:
     root = Path(root).expanduser().resolve()
     repo = repo or root.name
     store = Store(db)

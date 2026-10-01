@@ -1161,6 +1161,42 @@ class AnAnswerAgainstAChangedFileSaysSo(_Indexed):
         self.assertIn("re-run", out.get("error", "") + out.get("note", ""))
 
 
+class ConcurrentIndexingIsSafe(unittest.TestCase):
+    """SG-003. A session hook, an edit hook and a git hook can all refresh at once.
+    Two overlapping runs on a 1,720-file repository both re-read more than a thousand
+    of the same files, interleaving their writes; and a reader could be blocked while
+    an index committed."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(tempfile.mkdtemp(), "g.db")
+        for i in range(400):
+            with open(os.path.join(self.tmp, f"m{i}.py"), "w") as fh:
+                fh.write("".join(f"def f{i}_{j}(x):\n    return g{j}(x) + {j}\n\n" for j in range(30)))
+
+    def test_readers_never_wait_for_a_writer(self):
+        Store(self.db)
+        mode = sqlite3.connect(self.db).execute("PRAGMA journal_mode").fetchone()[0]
+        self.assertEqual(mode, "wal")
+
+    def test_overlapping_runs_split_the_work_instead_of_repeating_it(self):
+        import subprocess
+        script = ("import sys, json; sys.path.insert(0, sys.argv[3]);"
+                  "from skygraph.indexer import index;"
+                  "print(json.dumps(index(sys.argv[1], repo='t', db=sys.argv[2])['indexed']))")
+        runs = [subprocess.Popen([sys.executable, "-c", script, self.tmp, self.db, str(REPO)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                for _ in range(2)]
+        results = [run.communicate(timeout=300) for run in runs]
+        for run, (_out, err) in zip(runs, results):
+            self.assertEqual(run.returncode, 0, err[-800:])
+        read = sorted(int(out.strip()) for out, _err in results)
+        self.assertEqual(read, [0, 400],
+                         "both runs read the same files: the second must wait, then find "
+                         "nothing left to do")
+        self.assertEqual(len(Store(self.db).search("f399_29", "t")), 1)
+
+
 class TheServerNoticesAReplacedIndex(unittest.TestCase):
     """`skygraph index` replaces the file. A server holding the old handle keeps
     answering from a database that no longer exists — and looks like it is working."""

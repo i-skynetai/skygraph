@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse, json, sys
 from .indexer import index
 from .model import DEFAULT_BUDGET, Model
-from .store import IndexNewerThanServer, Store
+from .store import IndexNewerThanServer, Store, writer_lock
 from . import __version__, mcp
 
 #: One store, not one per project. `list_repos` only means anything if several
@@ -88,8 +88,9 @@ def _main(argv: list[str] | None = None) -> int:
     elif a.cmd == "neighbours":
         print(json.dumps(Store(a.db).neighbours(a.symbol, a.repo, a.branch), indent=2))
     elif a.cmd == "forget":
-        print(json.dumps({"repo": a.repo, "branch": a.branch,
-                          "files_forgotten": Store(a.db).forget(a.repo, a.branch)}))
+        with writer_lock(a.db):
+            forgotten = Store(a.db).forget(a.repo, a.branch)
+        print(json.dumps({"repo": a.repo, "branch": a.branch, "files_forgotten": forgotten}))
     elif a.cmd == "degraded":
         print(json.dumps(Store(a.db).degraded(a.repo, a.branch), indent=2))
     elif a.cmd == "serve":
