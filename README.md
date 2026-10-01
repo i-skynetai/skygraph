@@ -306,6 +306,26 @@ another project's code.
 
 [Architecture](docs/architecture.md) has the full design and the reasons behind it.
 
+## Limits
+
+Stated plainly, so nothing here is a surprise:
+
+- **Call resolution is partial.** Between 24 % (Ruby) and 74 % (Java) of in-repository
+  calls resolve to one declaration, depending on the language — see the table above.
+  The rest are marked `untyped` or `ambiguous`, never guessed, and the agent is told to
+  read the file for those.
+- **Refresh is automatic only at session start.** Edits made during a session, and
+  `git checkout` or `pull`, are picked up at the next session or by `skygraph index`.
+  Refreshing on every edit and git operation is the next release.
+- **Not read yet:** Helm templates, Terraform, GraphQL and protobuf schemas, ORMs outside
+  Python and Java, design diagrams, and Vue single-file components. Each is a roadmap
+  item.
+- **One machine, one user.** There is no cross-repository resolution and no shared
+  server for a team.
+- **The parsers download once,** about 22–26 MB from their GitHub release, the first
+  time a language needs one.
+- **Tested on macOS and Linux;** Windows is untested.
+
 ## Documentation
 
 | | |
@@ -321,7 +341,7 @@ another project's code.
 
 ## Status
 
-Version 0.2.0, beta. **277 tests**, including a golden-question benchmark with
+Version 0.2.0, beta. **279 tests**, including a golden-question benchmark with
 hand-checked answers and byte ceilings, run by CI on Python 3.11 to 3.14 — once without
 the parsers, for the fallback, and once as installed. Developed on macOS; CI runs on
 Linux.
