@@ -35,6 +35,7 @@ jobs:
           python -m pip install --quiet build
           python -m build --outdir /tmp/dist
           python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/dist/*.whl')[0]); names=z.namelist(); assert sum(n.endswith('.scm') for n in names) == 10, names"
+          python -c "import zipfile,glob; names=zipfile.ZipFile(glob.glob('/tmp/dist/*.whl')[0]).namelist(); assert any(n.endswith('demo_sample/shop/api.py') for n in names) and any(n.endswith('demo_sample/Dockerfile') for n in names), names"
           python -c "import tarfile,glob; names=tarfile.open(glob.glob('/tmp/dist/*.tar.gz')[0]).getnames(); assert any(n.endswith('tests/test_benchmark.py') for n in names) and any('tests/fixtures/bench_js' in n for n in names), names"
 
       # And again as installed, because the tier that reads every language other
@@ -45,3 +46,6 @@ jobs:
 
       - name: Run the suite again, with the parser tier live
         run: python -m unittest discover -s tests -t . -v
+
+      - name: The demo runs from the installed package
+        run: cd /tmp && skygraph demo

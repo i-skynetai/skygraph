@@ -27,6 +27,13 @@ over a gap, and says what it cannot see.
   The store uses SQLite's write-ahead log, so a server keeps answering while an
   index is written; its sidecar files are never indexed, and ones left behind by a
   deleted index are cleared instead of failing the next open.
+- `skygraph demo` (SG-004): see it work in one command, with no project and no agent. It
+  indexes a sample shop shipped in the package — Python API, order service, two
+  tables, TypeScript client, Dockerfile, CI file — into a temporary folder, asks the
+  questions an agent asks, prints each answer and its size, and leaves nothing behind.
+- A method called on what a call returns is typed in Python: `OrderService().place()`
+  and `make().save()` were recorded as `.place`, receiver lost. The demo found it; on
+  a real 1,720-file service, 636 more calls resolve.
 - `skygraph --version` and `skygraph-mcp --version`.
 - `skygraph init` writes every command by absolute path, taken from the environment
   that ran it, and quotes paths in the session hook: a host started from a dock has

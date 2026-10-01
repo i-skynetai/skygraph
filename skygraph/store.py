@@ -825,6 +825,12 @@ class Store:
                 head, _sep, member = raw.partition("().")
                 fn = ""
                 owner = src.rsplit(".", 1)[0] if "." in src.rsplit("::", 1)[-1] else ""
+                fresh = (place_class(path, head, mine)
+                         if "." not in head and not head.startswith("self.") else None)
+                if fresh:
+                    # `OrderService().place`: a method on a new instance of a class.
+                    found = member_of(fresh, member)
+                    return (found, "constructor") if found else ("", unplaced(member))
                 if head.startswith("self."):
                     fn = by_owner.get(owner, {}).get(head[len("self."):], "") if owner in class_names else ""
                 elif "." in head and head.split(".")[0] in go_packages.get(path, {}):

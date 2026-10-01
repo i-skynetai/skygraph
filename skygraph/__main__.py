@@ -68,6 +68,8 @@ def _main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ontologies", help="the five ontologies, as JSON — the shared definition")
 
+    sub.add_parser("demo", help="index a sample project and answer an agent's questions about it")
+
     a = ap.parse_args(argv)
     if a.cmd == "index":
         report = index(a.path, a.repo, a.branch, a.db, full=a.full,
@@ -80,6 +82,9 @@ def _main(argv: list[str] | None = None) -> int:
     elif a.cmd == "init":
         from .install import init
         init(a.path, a.repo, a.db, hook=not a.no_hook, codex=a.codex, run_index=not a.no_index)
+    elif a.cmd == "demo":
+        from .demo import run
+        return run()
     elif a.cmd == "ontologies":
         from .ontology import describe
         print(json.dumps(describe(), indent=2))

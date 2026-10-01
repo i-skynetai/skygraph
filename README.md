@@ -45,13 +45,19 @@ Or with pip, inside a virtual environment:
 pip install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
 ```
 
-Check it:
+**2. See it work.** No project or agent needed:
 
 ```bash
-skygraph --version
+skygraph demo
 ```
 
-**2. Wire a project.** From anywhere:
+It indexes a small sample shop — a Python API, an order service, two tables, a
+TypeScript client, a Dockerfile and a CI file — into a temporary folder, and asks it the
+questions a coding agent asks: where is this declared, what does this endpoint write to,
+who calls this, what breaks if it changes, can the index be trusted. Each answer is
+shown with its size, the way the agent receives it. Nothing is left behind.
+
+**3. Wire your project.** From anywhere:
 
 ```bash
 skygraph init /path/to/your/project
@@ -72,7 +78,7 @@ Running `init` again is safe: everything is merged or replaced, never duplicated
 paths it writes are absolute and belong to your machine; a teammate runs `init` on
 theirs.
 
-**3. Restart the agent in the project** and ask it something only the graph answers
+**4. Restart the agent in the project** and ask it something only the graph answers
 cheaply:
 
 > Use skygraph: where is `PaymentService` declared, and who calls its `refund` method?
@@ -119,8 +125,8 @@ resolved to one declaration on a real codebase; the rest are marked `untyped` or
 
 | Language | Parser | Measured on | Calls resolved |
 |---|---|---|---|
-| Python | built-in `ast` | a 1,720-file Python service | 65 % |
-| TypeScript, TSX | tree-sitter | a 10,089-file Angular and Java monorepo | 71 % |
+| Python | built-in `ast` | a 1,720-file Python service | 67 % |
+| TypeScript, TSX | tree-sitter | a 10,089-file Angular and Java monorepo | 72 % |
 | JavaScript | tree-sitter | the same monorepo's JavaScript files | 42 % |
 | Java | tree-sitter | the same monorepo · square/moshi | 54 % · 74 % |
 | C# | tree-sitter | serilog | 64 % |
@@ -206,6 +212,7 @@ language is not traversable, read the file directly.
 
 | Command | Does |
 |---|---|
+| `skygraph demo` | index a sample project and answer an agent's questions about it — the quickest way to see what it does |
 | `skygraph init <path>` | wire a project to Claude Code (and Codex with `--codex`), then index it |
 | `skygraph index <path> --repo <name>` | build or refresh the index; `--full` re-reads everything, `--summary` prints one line |
 | `skygraph forget --repo <name>` | drop one repository from the index |
@@ -286,10 +293,10 @@ on a laptop:
 
 | | patterns only | with parsers |
 |---|---|---|
-| symbols | 16,076 | **38,700** |
-| edges | 41,524 | **284,728** |
-| resolved calls | 14 | **38,773** |
-| cold index | 22 s | 54 s |
+| symbols | 16,166 | **38,790** |
+| edges | 41,628 | **284,832** |
+| resolved calls | 14 | **38,909** |
+| cold index | 14 s | 27 s |
 
 **The schema is the authority.** `skygraph/schema.py` and the five ontologies declare the
 kinds and relations that may exist; a front end — or a model — emitting anything else is
@@ -314,7 +321,7 @@ another project's code.
 
 ## Status
 
-Version 0.2.0, beta. **267 tests**, including a golden-question benchmark with
+Version 0.2.0, beta. **277 tests**, including a golden-question benchmark with
 hand-checked answers and byte ceilings, run by CI on Python 3.11 to 3.14 — once without
 the parsers, for the fallback, and once as installed. Developed on macOS; CI runs on
 Linux.

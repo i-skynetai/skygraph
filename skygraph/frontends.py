@@ -493,7 +493,14 @@ def _call_name(node) -> str | None:
                 return "self." + ".".join(reversed(parts))
             parts.append(cursor.id)
             return ".".join(reversed(parts))
-        # The receiver is a call, a subscript or a literal — not a name to follow.
+        # `OrderService().place()` / `make().save()`: a method on what a call returns.
+        # Written `head().member`, which the resolver types from the class or from the
+        # function's declared return type. It used to be `.place`, receiver lost.
+        if isinstance(cursor, ast.Call) and len(parts) == 1:
+            head = _call_name(cursor.func)
+            if head and "()" not in head and not head.startswith("."):
+                return f"{head}().{parts[0]}"
+        # The receiver is a subscript, a literal or a longer chain — not a name to follow.
         return f".{node.attr}"
     return None
 

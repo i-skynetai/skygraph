@@ -1801,6 +1801,56 @@ class TheYamlReaderCannotBeMadeToHang(unittest.TestCase):
         self.assertIn("deploy", got)
 
 
+class TheDemoWorksFromAFreshInstall(unittest.TestCase):
+    """SG-004. Someone evaluating skygraph should see it answer without their own
+    project or an agent: one command, nothing left behind."""
+
+    def test_it_answers_the_agents_questions_and_cleans_up(self):
+        import contextlib, io
+        from unittest import mock
+        from skygraph.__main__ import main
+        scratch = tempfile.mkdtemp()
+        said = io.StringIO()
+        with mock.patch.object(tempfile, "tempdir", scratch), contextlib.redirect_stdout(said):
+            code = main(["demo"])
+        text = said.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("shop/orders.py:6", text)                       # where it is
+        self.assertIn("table orders", text)                           # endpoint to table
+        self.assertIn("← OrderService.place (shop/orders.py)", text)  # who calls it
+        self.assertIn("← create_order (shop/api.py)", text)           # what it affects
+        self.assertIn("files degraded: 0", text)
+        if treesitter.available():
+            self.assertIn("→ placeOrder (web/src/api.ts)", text)      # across files, in TS
+        self.assertEqual(os.listdir(scratch), [], "the demo left files behind")
+
+    def test_the_sample_ships_inside_the_package(self):
+        import tomllib
+        data = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["setuptools"]
+        self.assertIn("demo_sample/**/*", data["package-data"]["skygraph"])
+        self.assertTrue((REPO / "skygraph" / "demo_sample" / "shop" / "api.py").is_file())
+
+
+class ACallOnAFreshInstanceIsTyped(_Indexed):
+    """Found by `skygraph demo`: `OrderService().place(order)` was recorded as `.place`,
+    receiver lost, and came out untyped — so the endpoint handler that places every
+    order was missing from `Inventory.reserve`'s blast radius."""
+
+    def test_a_method_called_on_a_constructor_result_resolves(self):
+        self.write("svc.py", "class OrderService:\n    def place(self, o):\n        return o\n")
+        self.write("api.py", "from svc import OrderService\n\n"
+                             "def create(o):\n    return OrderService().place(o)\n")
+        self.build()
+        self.assertIn(("api.py::create", "svc.py::OrderService.place"), self.rel("CALLS"))
+
+    def test_a_call_on_a_function_result_still_follows_its_return_type(self):
+        self.write("svc.py", "class Repo:\n    def save(self):\n        return 1\n\n"
+                             "def make() -> Repo:\n    return Repo()\n")
+        self.write("api.py", "from svc import make\n\ndef go():\n    return make().save()\n")
+        self.build()
+        self.assertIn(("api.py::go", "svc.py::Repo.save"), self.rel("CALLS"))
+
+
 class CiFilesAreReadNotDropped(_Indexed):
     """SG-001. Skygraph could not read its own workflows: they use `run: |`, the reader
     refused it, and the file was recorded as parsed with nothing in it."""
