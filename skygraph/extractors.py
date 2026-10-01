@@ -594,14 +594,19 @@ def deploy_from_pipeline(path: str, doc: dict) -> tuple[list[Symbol], list[Edge]
             return [], []
         reserved = {"stages", "variables", "default", "include", "workflow",
                     "image", "services", "before_script", "after_script", "cache"}
+        # A key starting with "." is a hidden template GitLab never runs — the thing
+        # `<<: *defaults` points at — not a job.
         jobs = {k: v for k, v in doc.items()
-                if k not in reserved and isinstance(v, dict)}
+                if k not in reserved and not str(k).startswith(".") and isinstance(v, dict)}
         gitlab = True
     if not jobs:
         return [], []
 
     name = doc.get("name") if isinstance(doc.get("name"), str) else path.rsplit("/", 1)[-1]
-    pipeline = f"{path}::{name}"
+    # One CI file is one pipeline, so the pipeline is named by the file. Named by its
+    # workflow name it collided with a job of the same name — a workflow called
+    # `release` whose one job is `release` — and one of the two was lost.
+    pipeline = path
     symbols = [Symbol(pipeline, "Pipeline", path, 1, 0, "query", summary=name)]
     edges: list[Edge] = []
 

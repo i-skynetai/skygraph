@@ -13,6 +13,14 @@ over a gap, and says what it cannot see.
   deep, in set order, so a shared library re-exporting more than that resolved
   differently with each Python hash seed: 38,728 to 38,779 calls on one unchanged
   monorepo. Walked completely and in path order, it is 38,909 every time.
+- CI and deployment YAML is read, not dropped (SG-001). Block scalars (`run: |`),
+  anchors, aliases, merge keys, nested flow collections, wrapped quoted strings and
+  tags are understood; on 141 real files the reader returns what PyYAML returns. It
+  used to refuse them — skygraph could not read its own workflows — and the refused
+  file was recorded as parsed and empty; what it still refuses is now marked
+  degraded with the reason. Seven open-source projects: 12 pipelines found, was 7.
+  A pipeline is named by its file, so one named like its job no longer vanishes, and
+  GitLab's hidden `.template` jobs are not stages.
 - Refreshes that overlap are safe (SG-003). One index takes one writer at a time: a
   second run waits for the first and then reads only what is still out of date —
   two overlapping runs used to re-read the same files and interleave their writes.

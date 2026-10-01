@@ -1716,12 +1716,38 @@ class TheMiniYamlReaderIsHonestAboutBeingSmall(unittest.TestCase):
         self.assertEqual([d["kind"] for d in miniyaml.load_all(K8S)],
                          ["Deployment", "ConfigMap"])
 
+    def test_block_scalars_anchors_merge_keys_and_tags_are_read(self):
+        """SG-001. These used to be refused — and almost every GitHub Actions, GitLab CI
+        and Kubernetes file uses one. Checked against PyYAML on 141 real files: all equal
+        (PyYAML reads the key `on:` as True; that quirk aside)."""
+        from skygraph import miniyaml
+        doc = miniyaml.load(
+            ".defaults: &d\n  image: python\n  tags: [docker]\n"
+            "test:\n  <<: *d\n  image: node\n  script:\n    - |\n"
+            "      make test  # this is part of the command\n      echo done: ok\n"
+            "steps:\n- run: |\n    one\n  name: after\n"
+            "folded: >-\n  a\n  b\n\n  c\n"
+            "ref: !reference [.setup, script]\nbucket: !Ref Data\n")
+        self.assertEqual(doc["test"], {"image": "node", "tags": ["docker"],
+                                       "script": ["make test  # this is part of the command\necho done: ok\n"]})
+        self.assertEqual(doc["steps"], [{"run": "one\n", "name": "after"}])
+        self.assertEqual(doc["folded"], "a b\nc")
+        self.assertEqual(doc["ref"], [".setup", "script"])
+        self.assertEqual(doc["bucket"], "Data")
+
+    def test_quoted_strings_wrap_and_flow_collections_nest(self):
+        from skygraph import miniyaml
+        doc = miniyaml.load("d: 'a contract. Distinct from\n  Class: see it''s use.'\n"
+                            "v: { ref: { name: s, key: u } }\nm: [\"a, b\", c]\n")
+        self.assertEqual(doc["d"], "a contract. Distinct from Class: see it's use.")
+        self.assertEqual(doc["v"], {"ref": {"name": "s", "key": "u"}})
+        self.assertEqual(doc["m"], ["a, b", "c"])
+
     def test_it_refuses_yaml_it_does_not_implement_rather_than_half_reading(self):
         """A caller that gets an error knows to use a real parser. A caller that got a
         silently truncated document would not."""
         from skygraph import miniyaml
-        for bad in ("base: &a\n  x: 1\n", "child:\n  <<: *a\n", "s: !!str 1\n",
-                    "body: |\n  line\n"):
+        for bad in ("? complex\n: key\n", "%YAML 1.2\n---\na: 1\n", "k: [a,\n  b]\n"):
             with self.subTest(yaml=bad.strip()[:20]):
                 with self.assertRaises(miniyaml.MiniYamlError):
                     miniyaml.load(bad)
@@ -1773,6 +1799,40 @@ class TheYamlReaderCannotBeMadeToHang(unittest.TestCase):
                     '  only:\n    - main\n')
         got = miniyaml.load(document)
         self.assertIn("deploy", got)
+
+
+class CiFilesAreReadNotDropped(_Indexed):
+    """SG-001. Skygraph could not read its own workflows: they use `run: |`, the reader
+    refused it, and the file was recorded as parsed with nothing in it."""
+
+    def test_this_repositorys_workflows_yield_their_pipelines_and_stages(self):
+        out = index(REPO / ".github", repo="self", db=self.db)
+        self.assertEqual(out["degraded"], 0)
+        stages = {r["name"] for r in Store(self.db).db.execute(
+            "SELECT name FROM symbols WHERE repo='self' AND kind='Stage'")}
+        self.assertIn("workflows/tests.yml::test", stages)
+        self.assertIn("workflows/release.yml::release", stages)
+        pipelines = {r["name"]: r["summary"] for r in Store(self.db).db.execute(
+            "SELECT name, summary FROM symbols WHERE repo='self' AND kind='Pipeline'")}
+        # `release.yml` is named `release` and so is its one job: both must survive.
+        self.assertEqual(pipelines, {"workflows/tests.yml": "tests", "workflows/release.yml": "release"})
+
+    def test_a_gitlab_file_with_merge_keys_yields_its_jobs_not_its_templates(self):
+        self.write(".gitlab-ci.yml", "stages: [build, deploy]\n"
+                   ".defaults: &defaults\n  image: python:3.12\n  before_script:\n    - |\n      pip install .\n"
+                   "build:\n  <<: *defaults\n  stage: build\n  script: [make]\n"
+                   "deploy_prod:\n  <<: *defaults\n  stage: deploy\n  script: [make deploy]\n")
+        self.build()
+        stages = {r["name"] for r in Store(self.db).db.execute(
+            "SELECT name FROM symbols WHERE repo='r' AND kind='Stage'")}
+        self.assertEqual(stages, {".gitlab-ci.yml::build", ".gitlab-ci.yml::deploy_prod"})
+
+    def test_a_file_the_reader_refuses_says_so(self):
+        self.write("odd.yaml", "? a complex key\n: value\n")
+        self.build()
+        gaps = {g["path"]: g["degraded"] for g in Store(self.db).degraded("r")}
+        self.assertIn("odd.yaml", gaps)
+        self.assertIn("complex key", gaps["odd.yaml"])
 
 
 class TheDeployOntology(_Indexed):

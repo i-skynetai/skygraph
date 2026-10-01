@@ -200,7 +200,11 @@ def _enrich(result: FileResult, path: str, source: str, lang: str | None,
         if found is not None:
             symbols, edges = found
         elif lang == "yaml":
-            symbols, edges = _deploy_yaml(path, source)
+            symbols, edges, refused = _deploy_yaml(path, source)
+            if refused and not result.degraded:
+                # Not silence: a CI file the reader cannot follow used to index as an
+                # empty, healthy file, and `index_health` had nothing to report (SG-001).
+                result.degraded = f"YAML this reader does not implement ({refused}); read as empty"
     elif lang == "manifest":
         symbols, edges = extractors.deploy_from_manifest(path, source)
     elif lang == "java":
@@ -221,18 +225,20 @@ def _enrich(result: FileResult, path: str, source: str, lang: str | None,
     result.edges += edges
 
 
-def _deploy_yaml(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
+def _deploy_yaml(path: str, source: str) -> tuple[list[Symbol], list[Edge], str]:
     """Compose files, Kubernetes manifests and CI workflows — all YAML, all different.
 
     A file that is none of them yields nothing, which is the right answer for the
-    ordinary config YAML that makes up most of a repository.
+    ordinary config YAML that makes up most of a repository. The third value is why the
+    reader refused the file, or "".
     """
     try:
         documents = miniyaml.load_all(source)
-    except miniyaml.MiniYamlError:
+    except miniyaml.MiniYamlError as exc:
         # The reader is a subset on purpose and says when a file is beyond it. Better
-        # to index the file as declaring nothing than to write half a manifest.
-        return [], []
+        # to index the file as declaring nothing than to write half a manifest — and
+        # to say so, so the gap is visible.
+        return [], [], str(exc).removeprefix("unsupported YAML ").strip(" ():")[:80]
 
     symbols: list[Symbol] = []
     edges: list[Edge] = []
@@ -244,7 +250,7 @@ def _deploy_yaml(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
             found, joined = extract(path, doc)
             symbols += found
             edges += joined
-    return symbols, edges
+    return symbols, edges, ""
 
 
 def _end(node) -> int:

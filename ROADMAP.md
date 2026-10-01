@@ -47,10 +47,10 @@ with one command, and nothing the README claims is broken. These rows block the 
 
 | ID | Feature | Area | P | Size | Status | Owner |
 |---|---|---|---|---|---|---|
-| SG-001 | [YAML with block scalars and anchors](#sg-001) | deploy | P0 | M | In progress | @arupmmi07, 2026-10-01 |
+| SG-001 | [YAML with block scalars and anchors](#sg-001) | deploy | P0 | M | Done — 0.2.0 | @arupmmi07 |
 | SG-002 | [Deterministic call resolution](#sg-002) | resolver | P0 | S | Done — 0.2.0 | @arupmmi07 |
 | SG-003 | [Safe concurrent indexing](#sg-003) | store | P0 | S | Done — 0.2.0 | @arupmmi07 |
-| SG-004 | [`skygraph demo`: see it work in one command](#sg-004) | experience | P0 | S | Ready | |
+| SG-004 | [`skygraph demo`: see it work in one command](#sg-004) | experience | P0 | S | In progress | @arupmmi07, 2026-10-01 |
 
 ### 0.3.0 — always fresh
 

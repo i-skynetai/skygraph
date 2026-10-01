@@ -117,11 +117,15 @@ A scan is linear and has nothing to backtrack, so that is what it is now.
 
 ### Why there is no YAML dependency
 
-There is no YAML parser in the standard library, and adding one for this would put a
-dependency in a project whose entire claim is that it has none. So the reader
-understands exactly the shape an OpenAPI document has — `paths:`, a route, a verb, a
-summary — everything it produces is tier 2, and a document it cannot follow produces
-nothing rather than something wrong.
+There is no YAML parser in the standard library, and the parsers are skygraph's one
+dependency. `miniyaml.py` reads the YAML that configuration files are actually written
+in — mappings, lists, flow collections, block scalars, anchors, aliases, merge keys, and
+tags (dropped, value kept). On 141 real CI, Kubernetes, Compose, Helm-values and
+ontology files it returns exactly what PyYAML returns, apart from PyYAML's YAML 1.1
+habit of reading the key `on:` as `True`. What it does not implement — complex keys,
+directives, a flow collection spanning lines, and Helm templates, which are not YAML
+until rendered — it refuses, and the file is marked degraded with the reason rather than
+indexed as an empty, healthy file.
 
 ## The link pass
 
