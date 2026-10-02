@@ -49,9 +49,13 @@ network](#privacy-and-network)).
 | `.claude/settings.json` | a session-start hook that re-indexes only changed files and prints one line into the agent's context (`--no-hook` to skip) |
 | Codex block | printed; `--codex` writes it into `~/.codex/config.toml` |
 
-Running `init` again is safe: everything is merged or replaced, never duplicated. The
-paths it writes are absolute and belong to your machine; a teammate runs `init` on
-theirs.
+Running `init` again is safe: everything is merged or replaced, never duplicated.
+
+When skygraph is on PATH, as it is after a pipx install, `.mcp.json` and
+`.claude/settings.json` name its commands with no path from your machine, so you can
+commit them. A teammate who installs skygraph gets the same setup, and on their first
+session the hook asks them to run `skygraph init .` once. If skygraph is reachable only
+by its path, `init` says so, and those two files then belong to your machine only.
 
 **4. Restart the agent in the project** and ask it something only the graph answers
 cheaply:
@@ -74,7 +78,7 @@ it](connecting.md) has the details.
 |---|---|
 | `skygraph demo` | index a sample project and answer an agent's questions about it — the quickest way to see what it does |
 | `skygraph init <path>` | wire a project to Claude Code (and Codex with `--codex`), then index it |
-| `skygraph index <path> --repo <name>` | build or refresh the index; `--full` re-reads everything, `--summary` prints one line |
+| `skygraph index <path> --repo <name>` | build or refresh the index; leave out `<path>` to refresh the folder the repository was indexed from; `--full` re-reads everything, `--summary` prints one line |
 | `skygraph forget --repo <name>` | drop one repository from the index |
 | `skygraph degraded --repo <name>` | files that were not parsed at their best tier, and why |
 | `skygraph search <text> --repo <name>` | find symbols by name from the terminal |
@@ -125,6 +129,7 @@ Every command that reads or writes an index takes `--db <file>` to use one other
 | `list_repos` comes back empty | The server reads a different index. Pass the same `--db` to `init` and the server, or re-run `init`. |
 | A tool answers "written by skygraph schema N … restart" | A server from before an upgrade is still running. Restart the agent. |
 | `index_health` lists a language as not traversable | Its parser did not load — usually the first index ran offline. Run `skygraph index <path> --repo <name> --full` once online. |
+| The session hook says "is not indexed on this machine yet", or "is not a folder" | The project was never indexed here, or it moved. Run `skygraph init .` in the project. The index is left as it was until you do. |
 | Answers point at old line numbers | Re-index, or reopen the session so the hook does. `read_source` already marks those answers `stale`. |
 
 ## Uninstall

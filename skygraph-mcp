@@ -50,13 +50,17 @@ if __name__ == "__main__":
     db = _flag("--db") or DEFAULT_DB
     repo = _flag("--repo")
     if "--index" in sys.argv:
-        # The session-start hook: a delta index, one line for the agent to read.
-        from skygraph.indexer import index
+        # The session-start hook: a delta index, one line for the agent to read. With no
+        # folder after it, the folder the repository was last indexed from.
+        from skygraph.indexer import NoProjectFolder, index
         from skygraph.install import summary_line
         from skygraph.store import IndexNewerThanServer
+        path = _flag("--index")
+        if path is not None and path.startswith("--"):
+            path = None
         try:
-            print(summary_line(index(_flag("--index"), repo, "main", db)))
-        except IndexNewerThanServer as exc:
+            print(summary_line(index(path, repo, "main", db)))
+        except (IndexNewerThanServer, NoProjectFolder) as exc:
             print(f"skygraph: {exc}")
             sys.exit(2)
         sys.exit(0)

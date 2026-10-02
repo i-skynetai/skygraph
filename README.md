@@ -51,7 +51,8 @@ its real output:
 1. **Install it**, as above. `pip install` into a virtual environment works too.
 2. **Wire your project.** This writes the server settings for Claude Code, a paragraph in
    `CLAUDE.md` telling the agent to ask the map first, and a hook that refreshes the index
-   when a session starts; then it indexes once.
+   when a session starts; then it indexes once. Installed with pipx, these files name no
+   path on your machine, so your team can commit them.
 
    ```bash
    skygraph init /path/to/your/project
@@ -92,7 +93,7 @@ is marked, so the agent knows when to read the file.
 
 ## Status
 
-Version 0.2.0, beta. 279 tests on Python 3.11 to 3.14, including a benchmark of agent
+Version 0.2.0, beta. 290 tests on Python 3.11 to 3.14, including a benchmark of agent
 questions with hand-checked answers. Next on the [roadmap](ROADMAP.md): refreshing the
 index after every edit and every git checkout. Contributions are welcome.
 

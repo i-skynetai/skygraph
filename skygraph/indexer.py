@@ -29,9 +29,23 @@ def digest(source: str) -> str:
     return hashlib.sha256(source.encode("utf-8", "replace")).hexdigest()[:16]
 
 
-def index(root: str | Path, repo: str | None = None, branch: str = "main",
+class NoProjectFolder(RuntimeError):
+    """There is no folder to index: the one given is missing, or none was given and
+    none is on record for the repository. Raised before anything is written.
+
+    Walking a folder that is not there finds no files, and a run removes from the index
+    every file it did not find — so a typo, or a project that moved, used to empty that
+    repository's index without a word.
+    """
+
+
+def index(root: str | Path | None, repo: str | None = None, branch: str = "main",
           db: str = DEFAULT_DB, full: bool = False, model=None) -> dict:
     """Index a tree. `full=True` re-reads every file instead of only what changed.
+
+    `root=None` means the folder this repository was last indexed from, as recorded in
+    the index. The session-start hook uses that, so the settings file it lives in names
+    no path from one person's machine.
 
     `model` is an optional tier-3 fallback for files no parser could read. It is asked
     only about those, only up to its budget, and everything it returns is marked as its
@@ -44,11 +58,21 @@ def index(root: str | Path, repo: str | None = None, branch: str = "main",
         return _index(root, repo, branch, db, full, model)
 
 
-def _index(root: str | Path, repo: str | None, branch: str, db: str, full: bool,
+def _index(root: str | Path | None, repo: str | None, branch: str, db: str, full: bool,
            model) -> dict:
-    root = Path(root).expanduser().resolve()
-    repo = repo or root.name
     store = Store(db)
+    if root is None:
+        root = store.root_of(repo, branch) if repo else None
+        if root is None:
+            store.db.close()
+            raise NoProjectFolder(f"{repo or 'this repository'} is not indexed on this "
+                                  "machine yet; run `skygraph init .` in the project")
+    root = Path(root).expanduser().resolve()
+    if not root.is_dir():
+        store.db.close()
+        raise NoProjectFolder(f"{root} is not a folder, so the index was left as it was; "
+                              "if the project moved, run `skygraph init` in its new place")
+    repo = repo or root.name
     store.remember_root(repo, branch, str(root))
     present: set[str] = set()
     unparsed: list[tuple[str, str, str]] = []

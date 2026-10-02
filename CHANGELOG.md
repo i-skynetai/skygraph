@@ -28,6 +28,16 @@ over a gap, and says what it cannot see.
 - Refreshes that overlap are safe (SG-003). One index takes one writer at a time: a
   second run waits for the first and then reads only what is still out of date —
   two overlapping runs used to re-read the same files and interleave their writes.
+- `init` writes files a team can commit (SG-005). `.mcp.json` and
+  `.claude/settings.json` carried this machine's install and project paths, so a
+  committed copy named one person's home folder and failed for everyone else. With
+  skygraph on PATH they now name `skygraph-mcp` and `skygraph` bare, and the hook names
+  no folder: it refreshes the one the index recorded. Not on PATH, `init` keeps absolute
+  paths and says the files are for this machine only. The Codex block, in your own
+  config, keeps its absolute path.
+- Indexing a folder that is not there no longer empties the index. A run removes every
+  file it did not find, so a typo or a moved project wiped that repository's graph; it
+  now refuses with the reason and changes nothing.
   The store uses SQLite's write-ahead log, so a server keeps answering while an
   index is written; its sidecar files are never indexed, and ones left behind by a
   deleted index are cleared instead of failing the next open.

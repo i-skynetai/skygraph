@@ -9,6 +9,9 @@ index no older than the session — then indexes once and prints what the agent 
 
 Everything written is idempotent: markers around the paragraph, a merge into existing
 JSON, a named server entry replaced rather than duplicated. Running it twice is safe.
+
+`.mcp.json` and `.claude/settings.json` are written to be committed: commands by name,
+and no path from this machine, whenever skygraph is on PATH (see `on_path`).
 """
 from __future__ import annotations
 
@@ -53,9 +56,9 @@ def installed(script: str) -> str | None:
     command, so `init` never wires a project to some other install of skygraph that
     happens to be earlier on PATH; then from PATH.
 
-    Absolute because a host started from a dock or a menu does not inherit the shell's
-    PATH. A bare name that works in a terminal fails there, and the host reports it as
-    "connection closed" with nothing to say the command was not found.
+    Absolute, so the command does not depend on the PATH the host was started with:
+    when a bare name is not found, a host reports only "connection closed". Shared
+    files use the bare name instead when that is safe (`on_path`).
     """
     beside = Path(sys.executable).parent / script
     for candidate in (beside, beside.with_suffix(".exe")):
@@ -65,10 +68,44 @@ def installed(script: str) -> str | None:
     return os.path.abspath(found) if found else None
 
 
-def server_command(repo: str, db: str) -> list[str]:
-    """How a host starts the server: the installed console script, else the checkout's
-    launcher — by absolute path either way, so it works from any working directory."""
+def on_path(script: str) -> bool:
+    """Whether a host will start this same install by the script's bare name.
+
+    `.mcp.json` and `.claude/settings.json` are meant to be committed, so they should
+    name a command, not a place on one person's disk. A bare name is safe when PATH
+    finds this install by it — through pipx's or uv's shared bin folder, or a plain
+    user or system install. It is not safe when PATH reaches it only because a virtual
+    environment is activated in this shell: the host, started later from another shell,
+    would not find it.
+    """
+    found = shutil.which(script)
+    if not found:
+        return False
+    here = installed(script)
+    if here and not os.path.samefile(found, here):
+        return False                       # PATH would start some other install
+    folder = os.path.dirname(os.path.abspath(found))
+    activated = (sys.prefix != sys.base_prefix
+                 and folder == os.path.dirname(os.path.abspath(sys.executable)))
+    return not activated
+
+
+def shared_files_are_portable() -> bool:
+    """Whether `.mcp.json` and the hook can name skygraph's commands without a path."""
+    return on_path("skygraph-mcp") and on_path("skygraph")
+
+
+def server_command(repo: str, db: str, shared: bool = True) -> list[str]:
+    """How a host starts the server.
+
+    For a shared file (`shared=True`, `.mcp.json`), the bare `skygraph-mcp` when PATH
+    finds this install by it. Otherwise, and always for a file only this user reads
+    (the Codex config), the installed console script or the checkout's launcher by
+    absolute path, which works from any working directory.
+    """
     args = ["--repo", repo] + (["--db", db] if db != DEFAULT_DB else [])
+    if shared and shared_files_are_portable():
+        return ["skygraph-mcp"] + args
     if installed("skygraph-mcp"):
         return [installed("skygraph-mcp")] + args
     if launcher():
@@ -77,12 +114,19 @@ def server_command(repo: str, db: str) -> list[str]:
                        "install with `pip install .` or run from the checkout")
 
 
-def index_command(project: Path, repo: str, db: str) -> str:
-    """The session-start hook: a delta index, one line of stdout for the agent."""
-    # A shell runs this, so every path is quoted: a project under "My Projects" would
-    # otherwise index "My" and fail on an argument it does not know.
+def index_command(repo: str, db: str) -> str:
+    """The session-start hook: a delta index, one line of stdout for the agent.
+
+    It names no project folder. The index records the folder each repository was
+    indexed from, and a run with no folder refreshes that one — or refuses, if it is
+    gone, rather than emptying the index.
+    """
+    # A shell runs this, so every path is quoted: a launcher under "My Projects" would
+    # otherwise run "My" and fail.
     q = shlex.quote
-    tail = f"{q(str(project))} --repo {q(repo)}" + (f" --db {q(db)}" if db != DEFAULT_DB else "")
+    tail = f"--repo {q(repo)}" + (f" --db {q(db)}" if db != DEFAULT_DB else "")
+    if shared_files_are_portable():
+        return f"skygraph index {tail} --summary"
     if installed("skygraph"):
         return f"{q(installed('skygraph'))} index {tail} --summary"
     if launcher():
@@ -118,7 +162,7 @@ def write_hook(project: Path, repo: str, db: str) -> Path:
     """A SessionStart hook in the project's `.claude/settings.json`. Its stdout is
     added to the agent's context, so the one line the index prints — what changed,
     what is untyped — is the first thing the agent reads."""
-    command = index_command(project, repo, db)
+    command = index_command(repo, db)
     target = project / ".claude" / "settings.json"
 
     def update(data: dict) -> None:
@@ -145,7 +189,9 @@ def write_instruction(path: Path) -> Path:
 
 
 def codex_block(repo: str, db: str) -> str:
-    command = server_command(repo, db)
+    # `~/.codex/config.toml` is this user's own file, never shared, so the absolute
+    # path, which does not depend on the PATH Codex was started with.
+    command = server_command(repo, db, shared=False)
     args = ", ".join(json.dumps(a) for a in command[1:])
     return (f"# skygraph:start\n[mcp_servers.skygraph]\ncommand = {json.dumps(command[0])}\n"
             f"args = [{args}]\n# skygraph:end\n")
@@ -186,7 +232,8 @@ def init(project: str | os.PathLike, repo: str | None = None, db: str = DEFAULT_
     if not project.is_dir():
         raise RuntimeError(f"{project} is not a directory")
     repo = repo or project.name
-    written: dict = {"repo": repo, "project": str(project)}
+    written: dict = {"repo": repo, "project": str(project),
+                     "portable": shared_files_are_portable()}
 
     written["mcp_json"] = str(write_mcp_json(project, repo, db))
     written["claude_md"] = str(write_instruction(project / "CLAUDE.md"))
@@ -209,6 +256,12 @@ def init(project: str | os.PathLike, repo: str | None = None, db: str = DEFAULT_
     print(f"wrote {written['claude_md']}" + (f" and {written['agents_md']}" if "agents_md" in written else ""), file=out)
     if hook:
         print(f"wrote {written['hook']} (SessionStart: delta index, one line into context)", file=out)
+    if not written["portable"]:
+        print("note: skygraph is not on PATH outside this shell, so .mcp.json"
+              + (" and .claude/settings.json name it" if hook else " names it")
+              + " by its path on this machine. That works here, but do not commit"
+              + (" them" if hook else " it") + "; install with pipx and run `skygraph init`"
+              " again to make them shareable", file=out)
     if codex:
         print(f"wrote {written['codex_config']}", file=out)
     else:

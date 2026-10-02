@@ -2578,8 +2578,6 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         self.assertEqual(server["type"], "stdio")
         self.assertTrue(server["command"].endswith("skygraph-mcp"))
         self.assertEqual(server["args"][:2], ["--repo", "demo"])
-        self.assertTrue(os.path.isabs(server["command"]),
-                        "a host started from a dock has no shell PATH to find a bare name")
 
     def test_it_merges_with_an_existing_mcp_json(self):
         with open(os.path.join(self.project, ".mcp.json"), "w") as fh:
@@ -2608,19 +2606,29 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         cfg = json.load(open(os.path.join(self.project, ".claude", "settings.json")))
         self.assertEqual(len(cfg["hooks"]["SessionStart"]), 1, "not duplicated")
 
-    def test_the_hook_survives_a_path_with_a_space(self):
-        """A shell runs the hook. Unquoted, "My Projects" indexed "My" and failed."""
-        import shlex
+    def test_the_hook_refreshes_the_project_from_anywhere(self):
+        """The real hook command, run by a shell from another folder, as a host runs it.
+
+        A project under "My Projects" once indexed "My" and failed. The hook now names no
+        folder at all, and refreshes the one the index recorded.
+        """
+        import subprocess
         spaced = os.path.join(tempfile.mkdtemp(), "My Projects")
         os.mkdir(spaced)
         with open(os.path.join(spaced, "a.py"), "w") as fh:
             fh.write("def go():\n    pass\n")
         self.install.init(spaced, "demo", self.db, hook=True, out=self.quiet)
         cfg = json.load(open(os.path.join(spaced, ".claude", "settings.json")))
-        words = shlex.split(cfg["hooks"]["SessionStart"][0]["hooks"][0]["command"])
-        self.assertTrue(os.path.isabs(words[0]), words[0])
-        self.assertIn(os.path.realpath(spaced), [os.path.realpath(w) for w in words],
-                      "the project path was split by the shell")
+        command = cfg["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        self.assertNotIn(os.path.realpath(spaced), command)
+        self.assertNotIn(spaced, command)
+        with open(os.path.join(spaced, "b.py"), "w") as fh:
+            fh.write("def added_later():\n    pass\n")
+        ran = subprocess.run(command, shell=True, cwd=tempfile.mkdtemp(),
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("skygraph: demo", ran.stdout)
+        self.assertTrue(Store(self.db).search("added_later", "demo"))
 
     def test_it_indexes_and_reports_one_line(self):
         written = self.install.init(self.project, "demo", self.db, hook=False, out=self.quiet)
@@ -2638,6 +2646,142 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         text = open(codex).read()
         self.assertIn("[other]", text)
         self.assertEqual(text.count("[mcp_servers.skygraph]"), 1)
+
+
+class SharedFilesNameNoMachinePath(unittest.TestCase):
+    """SG-005: `.mcp.json` and `.claude/settings.json` are meant to be committed.
+
+    `init` wrote this machine's install path and project path into both, so a committed
+    copy carried one person's home folder and broke for everyone else.
+    """
+
+    def setUp(self):
+        from unittest import mock
+        from skygraph import install
+        self.mock, self.install = mock, install
+        self.project = tempfile.mkdtemp()
+        self.db = os.path.join(tempfile.mkdtemp(), "g.db")
+        with open(os.path.join(self.project, "a.py"), "w") as fh:
+            fh.write("def go():\n    pass\n")
+
+    def _init(self, portable: bool):
+        import io
+        out = io.StringIO()
+        with self.mock.patch.object(self.install, "shared_files_are_portable",
+                                    return_value=portable):
+            self.install.init(self.project, "demo", self.db, hook=True, out=out)
+        mcp_json = open(os.path.join(self.project, ".mcp.json")).read()
+        settings = open(os.path.join(self.project, ".claude", "settings.json")).read()
+        return mcp_json, settings, out.getvalue()
+
+    def test_installed_on_path_the_shared_files_hold_no_path_from_this_machine(self):
+        mcp_json, settings, said = self._init(portable=True)
+        server = json.loads(mcp_json)["mcpServers"]["skygraph"]
+        self.assertEqual(server["command"], "skygraph-mcp")
+        hook = json.loads(settings)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        self.assertTrue(hook.startswith("skygraph index --repo demo"), hook)
+        for text in (mcp_json, settings):
+            self.assertNotIn(os.path.realpath(self.project), text)
+            self.assertNotIn(self.project, text)
+            self.assertNotIn(os.path.expanduser("~"), text)
+            self.assertNotIn(sys.prefix, text)
+        self.assertNotIn("do not commit", said)
+
+    def test_not_on_path_it_works_by_absolute_path_and_says_so(self):
+        mcp_json, settings, said = self._init(portable=False)
+        server = json.loads(mcp_json)["mcpServers"]["skygraph"]
+        self.assertTrue(os.path.isabs(server["command"]), server["command"])
+        self.assertIn("do not commit", said)
+        self.assertNotIn(self.project, settings, "the hook names no project folder either way")
+
+    def test_the_codex_config_keeps_the_absolute_path(self):
+        """It is the user's own file, never shared, so it need not depend on PATH."""
+        with self.mock.patch.object(self.install, "shared_files_are_portable",
+                                    return_value=True):
+            block = self.install.codex_block("demo", self.db)
+        command = json.loads(block.split("command = ", 1)[1].splitlines()[0])
+        self.assertTrue(os.path.isabs(command), command)
+
+    def _on_path(self, found, executable, prefix, base_prefix):
+        with self.mock.patch.object(self.install.shutil, "which", return_value=found), \
+                self.mock.patch.object(sys, "executable", executable), \
+                self.mock.patch.object(sys, "prefix", prefix), \
+                self.mock.patch.object(sys, "base_prefix", base_prefix):
+            return self.install.on_path("skygraph-mcp")
+
+    def _script(self, folder):
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "skygraph-mcp")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_a_shared_bin_folder_like_pipx_counts_as_on_path(self):
+        root = tempfile.mkdtemp()
+        venv_bin = os.path.join(root, "venvs", "skygraph", "bin")
+        real = self._script(venv_bin)
+        shared = os.path.join(root, "bin")
+        os.makedirs(shared)
+        link = os.path.join(shared, "skygraph-mcp")
+        os.symlink(real, link)
+        self.assertTrue(self._on_path(link, os.path.join(venv_bin, "python"),
+                                      os.path.dirname(venv_bin), "/usr"))
+
+    def test_an_activated_virtual_environment_does_not(self):
+        venv_bin = os.path.join(tempfile.mkdtemp(), "bin")
+        script = self._script(venv_bin)
+        self.assertFalse(self._on_path(script, os.path.join(venv_bin, "python"),
+                                       os.path.dirname(venv_bin), "/usr"))
+
+    def test_another_install_earlier_on_path_does_not(self):
+        mine = os.path.join(tempfile.mkdtemp(), "bin")
+        self._script(mine)
+        other = self._script(os.path.join(tempfile.mkdtemp(), "bin"))
+        self.assertFalse(self._on_path(other, os.path.join(mine, "python"),
+                                       os.path.dirname(mine), "/usr"))
+
+    def test_not_found_at_all_does_not(self):
+        self.assertFalse(self._on_path(None, sys.executable, sys.prefix, sys.base_prefix))
+
+
+class IndexingAMissingFolderChangesNothing(unittest.TestCase):
+    """A run removes every file it did not find, so walking a folder that is not there
+    used to empty the repository's index — after a typo, or once the project moved."""
+
+    def setUp(self):
+        self.project = tempfile.mkdtemp()
+        self.db = os.path.join(tempfile.mkdtemp(), "g.db")
+        with open(os.path.join(self.project, "a.py"), "w") as fh:
+            fh.write("def go():\n    pass\n")
+        index(self.project, "demo", db=self.db)
+
+    def test_a_missing_folder_is_refused_and_the_index_kept(self):
+        from skygraph.indexer import NoProjectFolder
+        with self.assertRaises(NoProjectFolder):
+            index(os.path.join(self.project, "not-here"), "demo", db=self.db)
+        self.assertTrue(Store(self.db).search("go", "demo"))
+
+    def test_no_folder_refreshes_the_one_on_record(self):
+        with open(os.path.join(self.project, "b.py"), "w") as fh:
+            fh.write("def later():\n    pass\n")
+        report = index(None, "demo", db=self.db)
+        self.assertEqual(report["indexed"], 1)
+        self.assertTrue(Store(self.db).search("later", "demo"))
+
+    def test_no_folder_for_a_repository_never_indexed_here_is_refused(self):
+        from skygraph.indexer import NoProjectFolder
+        with self.assertRaises(NoProjectFolder):
+            index(None, "elsewhere", db=self.db)
+
+    def test_the_command_says_why_and_exits_non_zero(self):
+        import contextlib, io
+        from skygraph.__main__ import main
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = main(["index", "--repo", "elsewhere", "--db", self.db, "--summary"])
+        self.assertEqual(code, 2)
+        self.assertIn("skygraph init", err.getvalue())
 
 
 class TheServerDefaultsToTheProjectRepo(unittest.TestCase):

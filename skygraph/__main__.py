@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse, json, sys
-from .indexer import index
+from .indexer import NoProjectFolder, index
 from .model import DEFAULT_BUDGET, Model
 from .store import IndexNewerThanServer, Store, writer_lock
 from . import __version__, mcp
@@ -16,7 +16,7 @@ from .store import DEFAULT_DB                                     # noqa: E402,F
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
-    except IndexNewerThanServer as exc:
+    except (IndexNewerThanServer, NoProjectFolder) as exc:
         print(f"skygraph: {exc}", file=sys.stderr)
         return 2
 
@@ -27,7 +27,10 @@ def _main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("index", help="walk a repository and build the graph")
-    p.add_argument("path"); p.add_argument("--repo"); p.add_argument("--branch", default="main")
+    p.add_argument("path", nargs="?",
+                   help="the project folder; leave it out to refresh the folder --repo "
+                        "was last indexed from")
+    p.add_argument("--repo"); p.add_argument("--branch", default="main")
     p.add_argument("--full", action="store_true", help="re-read every file, not only what changed")
     p.add_argument("--model-key", default="",
                    help="enable tier 3 for files no parser could read "

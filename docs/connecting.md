@@ -20,8 +20,11 @@ skygraph init /path/to/your/project
 | `.claude/settings.json` | a `SessionStart` hook: a delta index in seconds, and one line into the agent's context saying what changed and what is untyped (`--no-hook` to skip) |
 | Codex block | printed; `--codex` writes it into `~/.codex/config.toml` |
 
-Commands are written by absolute path, taken from the environment that ran `init`, so a
-host started from a dock or a menu — without your shell's PATH — still finds them.
+When skygraph is on PATH, the two project files name its commands with no path from your
+machine, so they can be committed; the hook refreshes the folder the index recorded for
+the repository. Otherwise they use absolute paths from the environment that ran `init`,
+and `init` says the files are for this machine only. The Codex block always uses the
+absolute path: it lives in your own config, so it need not depend on PATH.
 
 Then restart Claude Code in the project and ask it to run `list_repos`. Running `init`
 again is safe: everything it writes is merged or replaced, never duplicated.

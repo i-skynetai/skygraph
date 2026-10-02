@@ -51,6 +51,8 @@ with one command, and nothing the README claims is broken. These rows block the 
 | SG-002 | [Deterministic call resolution](#sg-002) | resolver | P0 | S | Done — 0.2.0 | @arupmmi07 |
 | SG-003 | [Safe concurrent indexing](#sg-003) | store | P0 | S | Done — 0.2.0 | @arupmmi07 |
 | SG-004 | [`skygraph demo`: see it work in one command](#sg-004) | experience | P0 | S | Done — 0.2.0 | @arupmmi07 |
+| SG-005 | [`init` writes nothing machine-specific into shared files](#sg-005) | setup | P0 | S | Done — 0.2.0 | @arupmmi07 |
+| SG-006 | [A manifest that does not parse is marked, not dropped](#sg-006) | deploy | P0 | S | Ready | |
 
 ### 0.3.0 — always fresh
 
@@ -156,6 +158,24 @@ entity and a call across files — into a throwaway index, asks the questions an
 asks (where is it, what calls it, what breaks, which table an endpoint writes), and
 prints each answer beside what reading the files would have cost; it needs no network
 beyond the one-time parser download, and it leaves nothing behind.
+
+<a id="sg-005"></a>**SG-005 — `init` writes nothing machine-specific into shared files.**
+`.mcp.json` and `.claude/settings.json` are meant to be committed, so a team shares one
+setup. `init` wrote the absolute path of the install and of the project into both, so a
+committed copy carried one person's home folder and failed for everyone else. *Done
+when:* with skygraph on PATH (pipx, or any install not reached only through an activated
+virtual environment), both files name the commands by their bare names and contain no
+path from this machine; the hook refreshes the folder the index already recorded for
+the repository, and refuses rather than wipes when that folder is gone or was never
+indexed here; when skygraph is not on PATH, `init` still works by absolute path and says
+plainly that those files are now specific to this machine. The Codex block, which lives
+in the user's own `~/.codex/config.toml`, keeps the absolute path.
+
+<a id="sg-006"></a>**SG-006 — A manifest that does not parse is marked, not dropped.** A
+`package.json`, `pyproject.toml`, `Cargo.toml` or `pom.xml` that fails to parse indexed
+as a healthy file that declares nothing, so `index_health` could not show the gap.
+*Done when:* such a file is recorded as degraded with the reason, and a valid manifest
+still yields its dependencies.
 
 ### Always fresh
 
