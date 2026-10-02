@@ -93,7 +93,7 @@ is marked, so the agent knows when to read the file.
 
 ## Status
 
-Version 0.2.0, beta. 290 tests on Python 3.11 to 3.14, including a benchmark of agent
+Version 0.2.0, beta. 293 tests on Python 3.11 to 3.14, including a benchmark of agent
 questions with hand-checked answers. Next on the [roadmap](ROADMAP.md): refreshing the
 index after every edit and every git checkout. Contributions are welcome.
 

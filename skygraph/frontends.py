@@ -206,7 +206,10 @@ def _enrich(result: FileResult, path: str, source: str, lang: str | None,
                 # empty, healthy file, and `index_health` had nothing to report (SG-001).
                 result.degraded = f"YAML this reader does not implement ({refused}); read as empty"
     elif lang == "manifest":
-        symbols, edges = extractors.deploy_from_manifest(path, source)
+        symbols, edges, broken = extractors.deploy_from_manifest(path, source)
+        if broken and not result.degraded:
+            # It used to index as a healthy file that declares nothing (SG-006).
+            result.degraded = f"manifest did not parse ({broken}); no dependencies read"
     elif lang == "java":
         symbols, edges = extractors.api_ontology_from_java(path, source)
         found, joined = extractors.data_ontology_from_java(path, source)

@@ -2931,6 +2931,36 @@ class ManifestsAreKnowledgeNotNoise(_Indexed):
         self.assertEqual(tiers["requirements.txt"], "query")
 
 
+class ABrokenManifestIsMarkedNotDropped(_Indexed):
+    """SG-006: a manifest that failed to parse indexed as a healthy file declaring
+    nothing, so `index_health` could not show that its dependencies were missing."""
+
+    def setUp(self):
+        super().setUp()
+        for folder in ("svc", "api", "web"):
+            os.makedirs(os.path.join(self.tmp, folder))
+        self.write("package.json", '{"dependencies": {"react": "^18"')          # cut off
+        self.write("svc/pyproject.toml", '[project\nname = "x"\n')                # no ]
+        self.write("api/pom.xml", "<project><dependencies><dependency>")        # unclosed
+        self.write("web/package.json", '{"dependencies": {"vue": "^3"}}')        # fine
+        self.build()
+
+    def test_each_broken_manifest_is_degraded_with_the_reason(self):
+        why = {f["path"]: f["degraded"] for f in self.store.degraded("r")}
+        self.assertEqual(set(why), {"package.json", "svc/pyproject.toml", "api/pom.xml"})
+        self.assertIn("JSONDecodeError", why["package.json"])
+        self.assertIn("TOMLDecodeError", why["svc/pyproject.toml"])
+        self.assertIn("ParseError", why["api/pom.xml"])
+
+    def test_a_valid_manifest_beside_them_still_declares_its_dependencies(self):
+        deps = {d.split("dep:")[-1] for s_, d in self.rel("DEPENDS_ON")}
+        self.assertEqual(deps, {"vue"})
+
+    def test_index_health_counts_them(self):
+        from skygraph import tools as surface
+        self.assertEqual(surface.index_health(self.store, {"repo": "r"})["degraded_files"], 3)
+
+
 class AModuleAndAnEndpointHaveAnEndLine(_Indexed):
     def test_a_module_reads_as_an_exact_range(self):
         self.write("a.py", "import os\n\ndef f():\n    pass\n")

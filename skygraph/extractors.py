@@ -840,13 +840,16 @@ GO_REQUIRE = re.compile(r"""^\s*(?:require\s+)?([\w.\-/]+\.[\w.\-/]+)\s+v[\w.\-+
 PY_REQ = re.compile(r"""^\s*([A-Za-z0-9][A-Za-z0-9._\-]*)""")
 
 
-def deploy_from_manifest(path: str, source: str) -> tuple[list[Symbol], list[Edge]]:
+def deploy_from_manifest(path: str, source: str) -> tuple[list[Symbol], list[Edge], str]:
     """Dependencies a manifest declares — one `Dependency` per package, `DEPENDS_ON`
     from the manifest. JSON, TOML and XML are parsed with the standard library and
     are tier 1; Gradle, Gemfile, go.mod and requirements are line patterns, tier 2.
 
     A manifest used to index as "unknown, heuristic": noise in the degraded list and
     no knowledge. An agent asked "does this project use X" now has an answer.
+
+    The third value is why the manifest could not be read, or "". A broken manifest
+    declares nothing, but it is not a healthy empty one, and the caller marks it so.
     """
     name = path.rsplit("/", 1)[-1]
     found: list[tuple[str, str, str]] = []                # (package, version, tier)
@@ -911,8 +914,8 @@ def deploy_from_manifest(path: str, source: str) -> tuple[list[Symbol], list[Edg
                 m = PY_REQ.match(text)
                 if m:
                     found.append((m.group(1), text[len(m.group(1)):].strip(), "query"))
-    except Exception:                                      # noqa: BLE001 — a broken manifest declares nothing
-        return [], []
+    except Exception as exc:                               # noqa: BLE001 — any parser's error
+        return [], [], type(exc).__name__
 
     symbols: list[Symbol] = []
     edges: list[Edge] = []
@@ -925,4 +928,4 @@ def deploy_from_manifest(path: str, source: str) -> tuple[list[Symbol], list[Edg
         symbols.append(Symbol(dep, "Dependency", path, 1, 0, tier,
                               summary=f"{pkg} {ver}".strip()))
         edges.append(Edge(path, "DEPENDS_ON", dep, tier))
-    return symbols, edges
+    return symbols, edges, ""

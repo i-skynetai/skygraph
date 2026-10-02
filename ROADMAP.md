@@ -52,7 +52,7 @@ with one command, and nothing the README claims is broken. These rows block the 
 | SG-003 | [Safe concurrent indexing](#sg-003) | store | P0 | S | Done — 0.2.0 | @arupmmi07 |
 | SG-004 | [`skygraph demo`: see it work in one command](#sg-004) | experience | P0 | S | Done — 0.2.0 | @arupmmi07 |
 | SG-005 | [`init` writes nothing machine-specific into shared files](#sg-005) | setup | P0 | S | Done — 0.2.0 | @arupmmi07 |
-| SG-006 | [A manifest that does not parse is marked, not dropped](#sg-006) | deploy | P0 | S | Ready | |
+| SG-006 | [A manifest that does not parse is marked, not dropped](#sg-006) | deploy | P0 | S | Done — 0.2.0 | @arupmmi07 |
 
 ### 0.3.0 — always fresh
 

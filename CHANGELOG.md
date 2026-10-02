@@ -38,6 +38,10 @@ over a gap, and says what it cannot see.
 - Indexing a folder that is not there no longer empties the index. A run removes every
   file it did not find, so a typo or a moved project wiped that repository's graph; it
   now refuses with the reason and changes nothing.
+- A manifest that does not parse is marked, not dropped (SG-006). A cut-off
+  `package.json`, a broken `pyproject.toml` or an unclosed `pom.xml` indexed as a healthy
+  file declaring nothing; it is now degraded with the parser's error, and
+  `index_health` counts it.
   The store uses SQLite's write-ahead log, so a server keeps answering while an
   index is written; its sidecar files are never indexed, and ones left behind by a
   deleted index are cleared instead of failing the next open.
