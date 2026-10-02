@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — 2026-09-29
+## 0.2.0 — 2026-10-01
 
 The first public release — the trust release: the graph stops answering confidently
 over a gap, and says what it cannot see.
