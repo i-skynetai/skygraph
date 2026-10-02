@@ -55,8 +55,10 @@ Changelog = "https://github.com/arupmmi07/skygraph/blob/main/CHANGELOG.md"
 skygraph = "skygraph.__main__:main"
 skygraph-mcp = "skygraph.__main__:serve_entry"
 
-[tool.setuptools]
-packages = ["skygraph"]
+# Found, not listed: the parser queries and the demo sample are folders inside the
+# package, and setuptools warns about any folder it would ship without being told.
+[tool.setuptools.packages.find]
+include = ["skygraph*"]
 
 [tool.setuptools.package-data]
 skygraph = ["queries/*.scm", "demo_sample/*", "demo_sample/**/*"]
