@@ -116,7 +116,7 @@ with one command, and nothing the README claims is broken. These rows block the 
 | SG-063 | [Search by description](#sg-063) | tools | P3 | L | Proposed | |
 | SG-064 | [Cross-repository resolution](#sg-064) | resolver | P3 | L | Proposed | |
 | SG-070 | [Publish to PyPI](#sg-070) | distribution | P1 | S | Needs decision | |
-| SG-071 | [CI on macOS and Windows](#sg-071) | distribution | P2 | M | Ready | |
+| SG-071 | [CI on macOS and Windows](#sg-071) | distribution | P2 | M | In progress | @arupmmi07, 2026-10-03 |
 | SG-072 | [A Claude Code plugin](#sg-072) | distribution | P2 | M | Proposed | |
 | SG-073 | [100,000-file repositories](#sg-073) | store | P2 | L | Proposed | |
 | SG-074 | [Serving one index to a team](#sg-074) | distribution | P3 | L | Proposed | |

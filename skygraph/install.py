@@ -109,7 +109,7 @@ def server_command(repo: str, db: str, shared: bool = True) -> list[str]:
     if installed("skygraph-mcp"):
         return [installed("skygraph-mcp")] + args
     if launcher():
-        return [str(launcher())] + args
+        return _run_launcher() + args
     raise RuntimeError("neither `skygraph-mcp` on PATH nor a checkout launcher was found; "
                        "install with `pip install .` or run from the checkout")
 
@@ -123,15 +123,33 @@ def index_command(repo: str, db: str) -> str:
     """
     # A shell runs this, so every path is quoted: a launcher under "My Projects" would
     # otherwise run "My" and fail.
-    q = shlex.quote
+    q = _quote
     tail = f"--repo {q(repo)}" + (f" --db {q(db)}" if db != DEFAULT_DB else "")
     if shared_files_are_portable():
         return f"skygraph index {tail} --summary"
     if installed("skygraph"):
         return f"{q(installed('skygraph'))} index {tail} --summary"
     if launcher():
-        return f"{q(str(launcher()))} --index {tail}"
+        return f"{' '.join(q(part) for part in _run_launcher())} --index {tail}"
     return f"{q(sys.executable)} -m skygraph index {tail} --summary"
+
+
+def _run_launcher() -> list[str]:
+    """The checkout launcher as a command. Windows ignores its shebang line and cannot
+    run it directly, so there it is handed to the interpreter running this command."""
+    if sys.platform == "win32":
+        return [sys.executable, str(launcher())]
+    return [str(launcher())]
+
+
+def _quote(word: str) -> str:
+    """Quote one word for the shell a host runs the hook with. On Windows that is often
+    cmd.exe, which does not read POSIX single quotes; double quotes work there and in
+    Git Bash, and a Windows path cannot contain one."""
+    quoted = shlex.quote(word)
+    if sys.platform == "win32" and quoted != word:
+        return f'"{word}"'
+    return quoted
 
 
 def _merge_json(path: Path, update) -> None:

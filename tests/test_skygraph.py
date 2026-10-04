@@ -7,6 +7,12 @@ from skygraph.schema import Symbol, Edge, KINDS, RELATIONS
 from skygraph.store import Store
 from skygraph.indexer import index
 
+
+def _run(launcher):
+    """The checkout launcher as a command, started the way skygraph itself starts it:
+    Windows ignores the shebang line, so there it goes through the interpreter."""
+    return [sys.executable, str(launcher)] if sys.platform == "win32" else [str(launcher)]
+
 PY = "import os\nfrom pkg import thing\n\nclass Alpha:\n    def run(self):\n        os.getcwd()\n        helper()\n\ndef helper():\n    pass\n"
 TS = 'import {a} from "./other";\nexport class Beta {}\nexport function go() {}\n'
 GO = 'package main\nimport "fmt"\ntype Server struct{}\nfunc Start() {}\n'
@@ -1201,6 +1207,9 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
     """`skygraph index` replaces the file. A server holding the old handle keeps
     answering from a database that no longer exists — and looks like it is working."""
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "deletes the database while the server holds it open; Windows "
+                     "refuses to delete an open file")
     def test_it_reopens_when_the_database_is_rebuilt(self):
         import subprocess
         launcher = REPO / "skygraph-mcp"
@@ -1212,7 +1221,7 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
             fh.write("def only_in_first():\n    pass\n")
         index(tmp, repo="first", db=db)
 
-        proc = subprocess.Popen([str(launcher), "--db", db], stdin=subprocess.PIPE,
+        proc = subprocess.Popen(_run(launcher) + ["--db", db], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, text=True, bufsize=1)
         try:
             def ask(req):
@@ -1260,7 +1269,7 @@ class TheServerNoticesAReplacedIndex(unittest.TestCase):
         raw.commit()
         raw.close()
 
-        proc = subprocess.Popen([str(launcher), "--db", db], stdin=subprocess.PIPE,
+        proc = subprocess.Popen(_run(launcher) + ["--db", db], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, text=True, bufsize=1)
         try:
             def ask(req):
@@ -1309,7 +1318,7 @@ class BothCommandsSayTheirVersion(unittest.TestCase):
 
         launcher = REPO / "skygraph-mcp"
         if launcher.is_file():
-            out = subprocess.run([str(launcher), "--version"], stdin=subprocess.DEVNULL,
+            out = subprocess.run(_run(launcher) + ["--version"], stdin=subprocess.DEVNULL,
                                  capture_output=True, text=True, timeout=30)
             self.assertEqual(out.stdout.strip(), f"skygraph-mcp {__version__}",
                              "the checkout launcher started serving instead of answering")
@@ -2301,12 +2310,15 @@ class TheLauncherStartsFromAnywhere(unittest.TestCase):
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                               "params": {"protocolVersion": "2025-06-18",
                                          "capabilities": {}}})
-        out = subprocess.run([str(self.launcher), "--db",
+        out = subprocess.run(_run(self.launcher) + ["--db",
                               os.path.join(tempfile.mkdtemp(), "g.db")],
                              input=request + "\n", capture_output=True, text=True,
                              cwd=tempfile.gettempdir(), timeout=60,
                              env={"PATH": os.environ.get("PATH", ""),
-                                  "HOME": os.environ.get("HOME", "")})
+                                  "HOME": os.environ.get("HOME", ""),
+                                  # Windows' Python cannot start without it.
+                                  **({"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+                                     if sys.platform == "win32" else {})})
         self.assertEqual(out.returncode, 0, out.stderr)
         reply = json.loads(out.stdout.splitlines()[0])
         self.assertEqual(reply["result"]["serverInfo"]["name"], "skygraph")
@@ -2576,8 +2588,12 @@ class SkygraphInitWiresAProject(unittest.TestCase):
         cfg = json.load(open(os.path.join(self.project, ".mcp.json")))
         server = cfg["mcpServers"]["skygraph"]
         self.assertEqual(server["type"], "stdio")
-        self.assertTrue(server["command"].endswith("skygraph-mcp"))
-        self.assertEqual(server["args"][:2], ["--repo", "demo"])
+        command = [server["command"], *server["args"]]
+        if sys.platform == "win32" and command[0] == sys.executable:
+            command = command[1:]       # Windows runs the shebang launcher through Python
+        # A console script is skygraph-mcp.exe on Windows.
+        self.assertTrue(command[0].endswith(("skygraph-mcp", "skygraph-mcp.exe")))
+        self.assertEqual(command[1:3], ["--repo", "demo"])
 
     def test_it_merges_with_an_existing_mcp_json(self):
         with open(os.path.join(self.project, ".mcp.json"), "w") as fh:
@@ -2717,6 +2733,8 @@ class SharedFilesNameNoMachinePath(unittest.TestCase):
         os.chmod(path, 0o755)
         return path
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "creating a symlink needs Developer Mode or admin rights on Windows")
     def test_a_shared_bin_folder_like_pipx_counts_as_on_path(self):
         root = tempfile.mkdtemp()
         venv_bin = os.path.join(root, "venvs", "skygraph", "bin")

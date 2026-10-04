@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Runs on Windows (SG-071). File keys are stored with forward slashes on every
+  platform, so a Windows index matches the one built on macOS or Linux and lookups by
+  `shop/inventory.py` work; it used to store `shop\inventory.py`, and every
+  cross-file answer came back empty. A CRLF file is no longer reported as changed since
+  indexing: the drift check now reads bytes as the indexer does. An index run closes
+  its database, so a temporary index can be deleted at once (the demo failed on
+  Windows). The session-start hook quotes paths with double quotes there, which
+  cmd.exe reads, and a checkout launcher is started through Python, since Windows
+  ignores its shebang line.
+
 ## 0.2.0 — 2026-10-01
 
 The first public release — the trust release: the graph stops answering confidently

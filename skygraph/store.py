@@ -440,9 +440,11 @@ class Store:
         if not root:
             return False
         from .indexer import digest                      # local: avoids a cycle
+        # Bytes, decoded as the indexer decodes them: read_text would turn CRLF into LF,
+        # so every CRLF file (the default checkout on Windows) read as changed.
         try:
-            return digest(Path(root).joinpath(path).read_text(encoding="utf-8",
-                                                              errors="replace")) != recorded
+            return digest(Path(root).joinpath(path).read_bytes().decode(
+                "utf-8", "replace")) != recorded
         except OSError:
             return True
 

@@ -55,21 +55,25 @@ def index(root: str | Path | None, repo: str | None = None, branch: str = "main"
     what is still out of date (see `writer_lock`).
     """
     with writer_lock(db):
-        return _index(root, repo, branch, db, full, model)
+        store = Store(db)
+        # Closed here, not left to the garbage collector: Windows refuses to delete a
+        # database file that any connection still holds, so a caller removing a
+        # temporary index right after the run failed there.
+        try:
+            return _index(store, root, repo, branch, full, model)
+        finally:
+            store.db.close()
 
 
-def _index(root: str | Path | None, repo: str | None, branch: str, db: str, full: bool,
-           model) -> dict:
-    store = Store(db)
+def _index(store: Store, root: str | Path | None, repo: str | None, branch: str,
+           full: bool, model) -> dict:
     if root is None:
         root = store.root_of(repo, branch) if repo else None
         if root is None:
-            store.db.close()
             raise NoProjectFolder(f"{repo or 'this repository'} is not indexed on this "
                                   "machine yet; run `skygraph init .` in the project")
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
-        store.db.close()
         raise NoProjectFolder(f"{root} is not a folder, so the index was left as it was; "
                               "if the project moved, run `skygraph init` in its new place")
     repo = repo or root.name
@@ -82,7 +86,7 @@ def _index(root: str | Path | None, repo: str | None, branch: str, db: str, full
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fn in filenames:
             p = Path(dirpath) / fn
-            rel = str(p.relative_to(root))
+            rel = p.relative_to(root).as_posix()
             claimed = frontends.language_of(rel)
             if claimed is None and not frontends.unclaimed_source(rel):
                 continue
