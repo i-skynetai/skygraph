@@ -11,13 +11,13 @@ You need Python 3.11 or newer and a git client.
 puts the two commands on your PATH:
 
 ```bash
-pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+pipx install "git+https://github.com/i-skynetai/skygraph.git@v0.2.0"
 ```
 
 Or with pip, inside a virtual environment:
 
 ```bash
-pip install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+pip install "git+https://github.com/i-skynetai/skygraph.git@v0.2.0"
 ```
 
 **2. See it work.** No project or agent needed:

@@ -4,7 +4,7 @@ about: Take a Ready feature from ROADMAP.md
 title: "Claim SG-XXX: "
 ---
 
-**Feature** — the ID and name from [ROADMAP.md](https://github.com/arupmmi07/skygraph/blob/main/ROADMAP.md), e.g. `SG-024 — Prisma
+**Feature** — the ID and name from [ROADMAP.md](https://github.com/i-skynetai/skygraph/blob/main/ROADMAP.md), e.g. `SG-024 — Prisma
 enums, @map, @relation, datasource`.
 
 **Plan** — two or three sentences: what you will change, and the fixture you will add.

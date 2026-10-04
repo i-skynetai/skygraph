@@ -13,7 +13,7 @@ roadmap.
 ## Setting up
 
 ```bash
-git clone https://github.com/arupmmi07/skygraph.git
+git clone https://github.com/i-skynetai/skygraph.git
 cd skygraph
 python3 -m venv .venv
 .venv/bin/pip install -e .

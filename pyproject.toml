@@ -45,11 +45,11 @@ dependencies = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.20,<2"]
 parsers = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.20,<2"]
 
 [project.urls]
-Homepage = "https://github.com/arupmmi07/skygraph"
-Source = "https://github.com/arupmmi07/skygraph"
-Documentation = "https://github.com/arupmmi07/skygraph/tree/main/docs"
-Issues = "https://github.com/arupmmi07/skygraph/issues"
-Changelog = "https://github.com/arupmmi07/skygraph/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/i-skynetai/skygraph"
+Source = "https://github.com/i-skynetai/skygraph"
+Documentation = "https://github.com/i-skynetai/skygraph/tree/main/docs"
+Issues = "https://github.com/i-skynetai/skygraph/issues"
+Changelog = "https://github.com/i-skynetai/skygraph/blob/main/CHANGELOG.md"
 
 [project.scripts]
 skygraph = "skygraph.__main__:main"

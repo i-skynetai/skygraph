@@ -5,7 +5,7 @@
 The first public release — the trust release: the graph stops answering confidently
 over a gap, and says what it cannot see.
 
-- Ready to install from GitHub: `pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"`.
+- Ready to install from GitHub: `pipx install "git+https://github.com/i-skynetai/skygraph.git@v0.2.0"`.
   The README follows the shared documentation standard: what it is, a picture, the
   problem, the words you need, a sixty-second demo with its real output pictured, three
   steps, one run explained, what you get, what it is not — under 900 words. The detail

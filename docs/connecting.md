@@ -7,7 +7,7 @@ hand, run from a checkout, or connect a host `init` does not know.
 ## The short way
 
 ```bash
-pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+pipx install "git+https://github.com/i-skynetai/skygraph.git@v0.2.0"
 skygraph init /path/to/your/project
 ```
 
@@ -64,7 +64,7 @@ each file of that language falls to the pattern tier and its row says why; run
 ### Running from a checkout
 
 ```bash
-git clone https://github.com/arupmmi07/skygraph.git
+git clone https://github.com/i-skynetai/skygraph.git
 cd skygraph
 python3 -m venv .venv
 .venv/bin/pip install "tree-sitter>=0.23" "tree-sitter-language-pack>=1.20,<2"
@@ -217,7 +217,7 @@ Neither is a substitute for re-indexing. Both exist so that not doing so is visi
 ## After upgrading skygraph
 
 ```bash
-pipx install --force "git+https://github.com/arupmmi07/skygraph.git@<new tag>"
+pipx install --force "git+https://github.com/i-skynetai/skygraph.git@<new tag>"
 ```
 
 An install pinned to a tag stays on that tag, so name the new one.

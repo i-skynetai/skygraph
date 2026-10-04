@@ -3,7 +3,7 @@ name: Propose a feature
 about: A question the graph should answer, or something it should read, that is not on the roadmap
 ---
 
-<!-- Check ROADMAP.md first: https://github.com/arupmmi07/skygraph/blob/main/ROADMAP.md
+<!-- Check ROADMAP.md first: https://github.com/i-skynetai/skygraph/blob/main/ROADMAP.md
 If it is there, use "Claim a feature" instead. An accepted proposal gets an SG ID and a
 row in ROADMAP.md. -->
 

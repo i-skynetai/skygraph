@@ -1,6 +1,6 @@
 # Skygraph
 
-[![tests](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml/badge.svg)](https://github.com/arupmmi07/skygraph/actions/workflows/tests.yml)
+[![tests](https://github.com/i-skynetai/skygraph/actions/workflows/tests.yml/badge.svg)](https://github.com/i-skynetai/skygraph/actions/workflows/tests.yml)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![licence](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
 
@@ -37,7 +37,7 @@ keeps it current, and answers those questions directly — and says so when it i
 You need Python 3.11 or newer and git. No account, no key, no project of your own:
 
 ```bash
-pipx install "git+https://github.com/arupmmi07/skygraph.git@v0.2.0"
+pipx install "git+https://github.com/i-skynetai/skygraph.git@v0.2.0"
 skygraph demo
 ```
 
